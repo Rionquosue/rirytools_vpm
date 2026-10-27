@@ -40,9 +40,15 @@ Feature requests and bug reports use the forms in `.github/ISSUE_TEMPLATE`. [`is
 
 Labels:
 
-1. `issue-check: passed`: every check passed. Scheduled issue triage reads only issues with this label. It is removed at the start of every run, so a failed run leaves the issue unread.
-2. `security: flagged`: the issue or a comment failed a security check.
-3. `security: reviewed`: add it yourself to clear a false positive. It is removed whenever someone other than the owner changes the issue or comments.
+1. `issue-check: passed`: every check passed. Scheduled issue triage reads only issues with this label, and only through [`scripts/triage_read.py`](scripts/triage_read.py), which checks the text again at read time. The label is removed at the start of every run, so a failed run leaves the issue unread.
+2. `security: flagged`: the issue, a comment, or the conversation read as a whole failed a security check.
+3. `security: reviewed`: the owner reviewed the current text. To clear a false positive, read the issue and every comment, then comment `reviewed <fingerprint>` with the fingerprint from the check's comment. Any later change to the text gives a new fingerprint and needs a new review.
 4. `needs clarification`: required form sections are missing.
 
-Text from the owner, members and collaborators is not security-checked.
+After three flagged edits, the flag is held until the owner reviews the issue, and the owner is assigned. Issues containing the maintainer routing code `rmo-54d7ea0f` also go straight to the maintainer.
+
+Text from the owner, members and collaborators is not security-checked. Characters outside plain text (ASCII, Latin-1, Latin Extended-A, common punctuation, arrows, box drawing and emoji) are flagged.
+
+## Releases
+
+`build-package.yml` builds only commits on the source repository's `main` and runs in the `release` environment. In **Settings > Environments > release**, add yourself as a required reviewer and limit deployment branches to `main` to approve every release by hand.
