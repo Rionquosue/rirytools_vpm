@@ -1,0 +1,55 @@
+name: Bug report
+description: Report something in RiryTools that does not work as expected.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        What happened, Expected behaviour, Steps to reproduce and both versions are required. Plain text only: no links, images, HTML or special fonts. Reports with them are flagged automatically.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What went wrong, and which tool or menu you were using.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What you expected to happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps from opening the project to the problem.
+    validations:
+      required: true
+  - type: input
+    id: unity-version
+    attributes:
+      label: Unity version
+      description: For example 2022.3.22f1.
+    validations:
+      required: true
+  - type: input
+    id: rirytools-version
+    attributes:
+      label: RiryTools version
+      description: Shown in Window > Package Manager, for example 0.7.0.
+    validations:
+      required: true
+  - type: input
+    id: vrchat-sdk-version
+    attributes:
+      label: VRChat SDK version
+      description: Only if you use the VRChat SDK (optional).
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: Errors or warnings from the Unity Console (optional). Paste the text; do not attach files.
+      render: text
