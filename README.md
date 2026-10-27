@@ -16,7 +16,7 @@ Or open [the listing page](https://rionquosue.github.io/rirytools_vpm/) and pres
 
 3. It then runs [`build-listing.yml`](.github/workflows/build-listing.yml), VRChat's [package-list-action](https://github.com/vrchat-community/package-list-action) (pinned to a commit), which builds `index.json` and the landing page from the releases. [`scripts/verify_listing.py`](scripts/verify_listing.py) rejects any package other than `com.riry.rirytools`, any version whose release was not made by the build, and any zip whose SHA-256 differs. Each version not yet deployed must also be reproducible: the source commit named in its release notes must be on source `main`, and rebuilding it must give the identical zip. It writes a summary of what will be served.
 
-4. The check runs in its own job, on the exact artifact that will be deployed. A version already deployed with a different SHA-256 is rejected: a published zip never changes.
+4. The check runs in its own job, on the exact artifact that will be deployed: only the files in `Website/` plus `index.json`, static files unchanged, pages loading only the template's scripts and linking only to known addresses, listing fields matching `source.json`, and each version's entry matching its rebuilt `package.json`. A version already deployed with a different SHA-256 is rejected: a published zip never changes.
 
 5. The deploy job waits in the `github-pages` environment for the owner's approval. Read the summary on the run page, then approve.
 
@@ -58,6 +58,13 @@ Labels:
 The owner is assigned to every flagged issue. After three flagged edits by the same person, the flag is held: a review clears it only for the text reviewed, and any later change needs a new review.
 
 Text from the owner, members and collaborators skips the link, path, HTML and encoding checks but gets every check aimed at AI readers, since it may relay outsider text. A conversation over 200,000 characters, or one too slow to check, is flagged for review. Characters outside plain text (ASCII, Latin-1, Latin Extended-A, common punctuation, arrows, box drawing and emoji) are flagged.
+
+## Tests
+
+Both run offline:
+
+1. `TEST_TRIPWIRE_CODES="<code-one>,<code-two>" python3 tests/test_issue_check.py` (the canary scenarios are skipped without the codes).
+2. `SOURCE=<full clone of riryunityworkflow> python3 tests/test_verify_listing.py`.
 
 ## Contact
 
