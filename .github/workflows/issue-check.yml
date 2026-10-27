@@ -36,4 +36,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           TRIPWIRE_HASHES: ${{ vars.TRIPWIRE_HASHES }}
-        run: python3 -I scripts/issue_check.py
+        # Fail closed until the tripwire hashes are configured: no issue is marked passed.
+        run: |
+          test -n "$TRIPWIRE_HASHES" || { echo "::error::Set the TRIPWIRE_HASHES Actions variable."; exit 1; }
+          python3 -I scripts/issue_check.py

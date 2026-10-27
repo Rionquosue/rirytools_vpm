@@ -48,6 +48,9 @@ def package_files(source):
             names = [n for n in names if not n.startswith(".")]
         else:
             directories[:] = [d for d in directories if d != ".git"]
+        for directory in directories:
+            if os.path.islink(os.path.join(root, directory)):
+                sys.exit("%s is a symbolic link; the package may not contain links." % os.path.join(relative_root, directory))
         for name in names:
             relative = os.path.normpath(os.path.join(relative_root, name)).replace(os.sep, "/")
             path = os.path.join(source, relative)
@@ -59,10 +62,6 @@ def package_files(source):
                 if handle.read(len(LFS_POINTER)) == LFS_POINTER:
                     sys.exit("%s is a Git LFS pointer; check out with LFS." % relative)
             files.append(relative)
-    for root, directories, _ in os.walk(source):
-        for directory in directories:
-            if os.path.islink(os.path.join(root, directory)):
-                sys.exit("%s is a symbolic link; the package may not contain links." % os.path.relpath(os.path.join(root, directory), source))
     return sorted(files)
 
 
