@@ -53,9 +53,9 @@ Labels:
 3. `security: reviewed`: the owner reviewed the current text. To clear a false positive, read the issue and every comment, then post a comment that is exactly `reviewed <fingerprint>`, with the 64-character fingerprint from the check's comment. Only your latest review counts, and any later change to the text gives a new fingerprint and needs a new review.
 4. `needs clarification`: required form sections are missing.
 
-The owner is assigned to every flagged issue. After three flagged edits by the same person, the flag is held until the owner reviews the issue.
+The owner is assigned to every flagged issue. After three flagged edits by the same person, the flag is held: a review clears it only for the text reviewed, and any later change needs a new review.
 
-Text from the owner, members and collaborators is checked only where it quotes (`>` lines). Characters outside plain text (ASCII, Latin-1, Latin Extended-A, common punctuation, arrows, box drawing and emoji) are flagged.
+Text from the owner, members and collaborators skips the link, path, HTML and encoding checks but gets every check aimed at AI readers, since it may relay outsider text. A conversation over 200,000 characters, or one too slow to check, is flagged for review. Characters outside plain text (ASCII, Latin-1, Latin Extended-A, common punctuation, arrows, box drawing and emoji) are flagged.
 
 ## Contact
 

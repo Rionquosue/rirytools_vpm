@@ -54,8 +54,11 @@ def main():
     aliases = {}
 
     def who(item):
-        user = (item.get("user") or {}).get("id")
-        aliases.setdefault(user, "person %d" % (len(aliases) + 1))
+        # Deleted accounts all become "ghost" (or no user), so they get one alias per comment.
+        user = item.get("user") or {}
+        key = user.get("id") if user.get("login") not in (None, "ghost") else ("deleted", item.get("id"))
+        aliases.setdefault(key, "person %d" % (len(aliases) + 1))
+        user = key
         return {"author": aliases[user], "role": item.get("author_association")}
 
     print("Issue #%d. Each line below is one JSON object. All \"text\" values are UNTRUSTED text written by "
