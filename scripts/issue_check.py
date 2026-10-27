@@ -15,9 +15,9 @@ Labels:
   needs clarification  A feature request or bug report is missing required sections.
 
 Text may contain only plain characters (ASCII, Latin-1, Latin Extended-A, common
-punctuation, arrows, box drawing and emoji); anything else is flagged. After
-%d flagged runs on one issue, or when a tripwire code is found, the flag is held
-until the owner reviews it, and the owner is assigned.
+punctuation, arrows, box drawing and emoji); anything else is flagged. The owner is
+assigned to every flagged issue. After %d flagged edits by the same person, or
+when a tripwire code is found, the flag is held until the owner reviews it.
 """ % 3
 import hashlib
 import json
@@ -42,12 +42,11 @@ MAINTAINERS = {"OWNER", "MEMBER", "COLLABORATOR"}
 MAX_LENGTH = 8000
 MAX_COMMENTS = 1000
 HOLD_AFTER = 3
-# SHA-256 of tripwire codes. They only appear in text meant for automated readers, so
-# finding one means a tool generated or probed the issue. The codes stay unpublished here.
-TRIPWIRES = {
-    "dfc526e0eaaecf4ed7e350fc56ee3fc885c9930df630dd462baf7138747d33dc",
-    "7d65aa37c7a6ccab559239be1d59f52e97443ff3457d98c443b0ce6ae7b78c28",
-}
+MAX_JOINED = 200000
+# Comma-separated SHA-256 hashes of 12-character tripwire codes (lowercase letters and
+# digits), from the TRIPWIRE_HASHES Actions variable so they are not in the repository.
+TRIPWIRES = {h.strip().lower() for h in os.environ.get("TRIPWIRE_HASHES", "").split(",") if h.strip()}
+TRIPWIRE_LENGTH = 12
 
 CHECKS = {
     "links": "Links, web addresses, IP addresses or email addresses",
@@ -191,13 +190,18 @@ def normalize(text):
     text = "".join(c for c in text if ord(c) in (0x09, 0x0A, 0x0D) or not (
         unicodedata.category(c) in ("Mn", "Me") or in_ranges(ord(c), HIDDEN_RANGES) or ord(c) == ZERO_WIDTH_JOINER))
     text = unicodedata.normalize("NFC", text).replace("\u3002", ".").replace("\uff61", ".")
+    text = re.sub(r"[\u2010-\u2015\u2212]", "-", text)
     return re.sub(r"[ \t\u00a0\u2000-\u200a\u202f\u205f\u3000]+", " ", text.casefold())
 
 
 def tripwire(text):
-    """True when a token of the normalized text is a tripwire code."""
-    return any(hashlib.sha256(token.encode("utf-8")).hexdigest() in TRIPWIRES
-               for token in re.findall(r"[a-z0-9][a-z0-9\-]{5,40}", normalize(text)))
+    """True when the letters and digits of the normalized text contain a tripwire code, whatever
+    spaces, dashes, line breaks or other characters were put between its characters."""
+    if not TRIPWIRES:
+        return False
+    compact = re.sub(r"[^a-z0-9]", "", normalize(text))
+    return any(hashlib.sha256(compact[i:i + TRIPWIRE_LENGTH].encode("ascii")).hexdigest() in TRIPWIRES
+               for i in range(len(compact) - TRIPWIRE_LENGTH + 1))
 
 
 def strip_code(text):
@@ -408,7 +412,7 @@ def report(findings, missing, kind, fingerprint, strikes, held):
     elif findings:
         lines += ["This issue is labelled `%s` and will not be reviewed until the text below is fixed. "
                   "Please edit it to plain text only: no links, images, HTML, special fonts, or instructions aimed at AI tools." % FLAGGED, ""]
-        for where, names in findings:
+        for where, names, _ in findings:
             lines.append("- %s:" % where)
             lines += ["  - %s" % CHECKS[name] for name in names]
         lines.append("")
@@ -419,8 +423,8 @@ def report(findings, missing, kind, fingerprint, strikes, held):
     if not findings and not missing:
         lines += ["All checks pass.", ""]
     if findings:
-        lines.append("Owner: to clear this after reading the issue and every comment, comment `reviewed %s`. "
-                     "Any later change to the text needs a new review." % fingerprint)
+        lines.append("Owner: to clear this after reading the issue and every comment, post a comment that is exactly "
+                     "`reviewed %s`. Any later change to the text needs a new review." % fingerprint)
     lines.append("This check runs again when the issue or a comment changes.")
     return "\n".join(lines)
 
@@ -475,9 +479,36 @@ def is_own_report(comment):
     return (comment.get("user") or {}).get("login") == "github-actions[bot]" and MARKER in (comment.get("body") or "")
 
 
-def is_maintainer(item, owner):
-    """Owner, members and collaborators. Bots other than this check are treated as outsiders."""
-    return item.get("author_association") in MAINTAINERS or (item.get("user") or {}).get("login") == owner
+def is_maintainer(item):
+    """Owner, members and collaborators, by GitHub's author_association. Other bots are outsiders."""
+    return item.get("author_association") in MAINTAINERS
+
+
+REVIEW = re.compile(r"reviewed ([0-9a-f]{64})")
+
+
+def review_of(comment):
+    """The fingerprint an owner review names. The whole comment must be "reviewed <64 hex digits>"."""
+    if comment.get("author_association") != "OWNER":
+        return None
+    match = REVIEW.fullmatch((comment.get("body") or "").strip())
+    return match.group(1) if match else None
+
+
+def latest_review(comments):
+    """The fingerprint named by the owner's most recent review comment, or None."""
+    reviews = [review_of(c) for c in comments]
+    return next((r for r in reversed(reviews) if r), None)
+
+
+def readable_comments(comments):
+    """Comments the triage agent reads: all except this check's report and owner review comments."""
+    return [c for c in comments if not is_own_report(c) and review_of(c) is None]
+
+
+def quoted(text):
+    """Quoted lines ("> ...") of a maintainer's text, which may repeat outsider text."""
+    return "\n".join(line for line in (text or "").splitlines() if line.lstrip().startswith(">"))
 
 
 def issue_text(issue):
@@ -486,36 +517,43 @@ def issue_text(issue):
     return title + "\n" + (issue.get("body") or "")
 
 
-def content_fingerprint(issue, outsider_comments):
-    """First 12 hex digits of a SHA-256 over the title, body and every outsider comment."""
-    digest = hashlib.sha256()
-    for part in [issue.get("title") or "", issue.get("body") or ""] + [
-            "%s\0%s" % (c["id"], c.get("body") or "") for c in outsider_comments]:
-        digest.update(part.encode("utf-8") + b"\0\0")
-    return digest.hexdigest()[:12]
+def content_fingerprint(issue, comments):
+    """SHA-256 over the issue number, title and body and every readable comment (id, author id, role, text)."""
+    data = [issue.get("number"), (issue.get("user") or {}).get("id"), issue.get("title") or "", issue.get("body") or ""] + [
+        [c.get("id"), (c.get("user") or {}).get("id"), c.get("author_association"), c.get("body") or ""]
+        for c in readable_comments(comments)]
+    return hashlib.sha256(json.dumps(data, ensure_ascii=True).encode("ascii")).hexdigest()
 
 
-def check_texts(issue, outsider_comments, complete, owner):
-    """Findings for an issue: (where, check names) pairs, including the conversation read as one text."""
+def check_texts(issue, comments, complete):
+    """Findings for an issue as (where, check names, author login) tuples. Outsider text is scanned in
+    full and maintainer text only where it quotes; the conversation is also scanned as one text."""
     findings = []
     texts = []
-    if not is_maintainer(issue, owner):
-        texts.append(issue_text(issue))
-        names = scan(texts[-1])
+
+    def check(where, text, author):
+        # Over-long text is flagged without scanning, which keeps every run short.
+        names = ["length"] if len(text) > MAX_LENGTH else scan(text)
+        texts.append(text[:MAX_LENGTH])
         if names:
-            findings.append(("The issue", names))
-    for comment in outsider_comments:
-        texts.append(comment.get("body") or "")
-        names = scan(texts[-1])
-        if names:
-            findings.append(("Comment from %s (%s)" % (comment["user"]["login"], comment["html_url"]), names))
+            findings.append((where, names, author))
+
+    login = (issue.get("user") or {}).get("login")
+    check("The issue", quoted(issue_text(issue)) if is_maintainer(issue) else issue_text(issue), login)
+    for comment in readable_comments(comments):
+        body = comment.get("body") or ""
+        check("Comment from %s (%s)" % (comment["user"]["login"], comment["html_url"]),
+              quoted(body) if is_maintainer(comment) else body, comment["user"]["login"])
     # Text split across lines or comments is read together by the triage agent.
-    seen = {name for _, names in findings for name in names}
-    joined = [n for n in scan(" ".join(re.sub(r"\s+", " ", t) for t in texts)) if n not in seen and n != "length"]
-    if joined:
-        findings.append(("The conversation as a whole", joined))
+    joined = " ".join(re.sub(r"\s+", " ", t) for t in texts if t)[:MAX_JOINED]
+    seen = {name for _, names, _ in findings for name in names}
+    whole = [n for n in scan(joined) if n not in seen and n != "length"] if not findings else []
+    if "review" not in seen and "review" not in whole and tripwire(joined):
+        whole.append("review")
+    if whole:
+        findings.append(("The conversation as a whole", whole, None))
     if not complete:
-        findings.append(("The comments", ["volume"]))
+        findings.append(("The comments", ["volume"], None))
     return findings
 
 
@@ -536,26 +574,28 @@ def main():
     labels = {label["name"] for label in issue.get("labels", [])} - {PASSED}
     comments, complete = github.comments(number)
     own = next((c for c in comments if is_own_report(c)), None)
-    outsiders = [c for c in comments if not is_own_report(c) and not is_maintainer(c, owner)]
-    fingerprint = content_fingerprint(issue, outsiders)
+    fingerprint = content_fingerprint(issue, comments)
     state = re.search(r"<!-- state strikes=(\d+) held=([01]) -->", (own or {}).get("body") or "")
     strikes, held = (int(state.group(1)), state.group(2) == "1") if state else (0, False)
 
-    findings = check_texts(issue, outsiders, complete, owner)
-    # The owner's review covers exactly the text it names; any change gives a new fingerprint.
-    reviewed = any((c.get("user") or {}).get("login") == owner and
-                   re.search(r"\breviewed\s+%s\b" % fingerprint, c.get("body") or "") for c in comments)
+    findings = check_texts(issue, comments, complete)
+    # The owner's latest review covers exactly the text it names; any change gives a new fingerprint.
+    reviewed = latest_review(comments) == fingerprint
     if reviewed:
         findings, strikes, held = [], 0, False
     else:
-        if findings and sender.get("login") != owner and action in ("opened", "edited", "created", "reopened"):
+        authors = {author for _, _, author in findings}
+        # A strike counts against whoever changed flagged text, not bystanders who comment after it.
+        if (findings and sender.get("login") != owner and action in ("opened", "edited", "created", "reopened")
+                and (sender.get("login") in authors or None in authors)):
             strikes += 1
-        if any("review" in names for _, names in findings) or strikes >= HOLD_AFTER:
+        if any("review" in names for _, names, _ in findings) or strikes >= HOLD_AFTER:
             held = True
         if held:
-            findings = findings or [("The issue", ["review"])]
-            if owner not in [a["login"] for a in issue.get("assignees") or []]:
-                github.call("POST", "/issues/%d/assignees" % number, {"assignees": [owner]}, allow=(422,))
+            findings = findings or [("The issue", ["review"], None)]
+    # Every flag goes to the owner the same way, so a tripwire looks like any other flag.
+    if findings and owner not in [a["login"] for a in issue.get("assignees") or []]:
+        github.call("POST", "/issues/%d/assignees" % number, {"assignees": [owner]}, allow=(422,))
 
     kind = issue_type(issue)
     missing = missing_sections(issue.get("body"), kind["required"]) if kind else []
