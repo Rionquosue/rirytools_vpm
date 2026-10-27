@@ -12,14 +12,12 @@ on:
   workflow_dispatch:
   push:
     branches: main
-    paths: source.json
+    paths:
+      - source.json
+      - Website/**
 
 permissions:
   contents: read
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
 
 env:
   listPublishDirectory: Website
@@ -61,10 +59,12 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
 
+      # Kept a week, so an approval later than a day still finds the artifact.
       - name: Upload artifact
         uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
         with:
           path: ${{env.listPublishDirectory}}
+          retention-days: 7
 
   # A separate job with fresh checkouts checks the exact artifact that will be deployed,
   # so nothing the listing build downloaded or ran can change the check.
@@ -103,9 +103,14 @@ jobs:
           tar -xf "$RUNNER_TEMP/pages/artifact.tar" -C "$RUNNER_TEMP/site"
           python3 -I scripts/verify_listing.py "$RUNNER_TEMP/site/index.json" --source source
 
+  # Only deployments queue: a run waiting for approval does not hold up the next build and
+  # check, and the newest waiting deployment replaces an older one.
   deploy:
     needs: verify-listing
     runs-on: ubuntu-latest
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     permissions:
       pages: write
       id-token: write

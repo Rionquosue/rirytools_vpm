@@ -489,10 +489,6 @@ class GitHub:
             self.call("DELETE", "/issues/%d/labels/%s" % (number, urllib.parse.quote(name, safe="")), allow=(404,))
 
 
-def is_bot(user):
-    return (user or {}).get("type") == "Bot"
-
-
 def is_own_report(comment):
     return (comment.get("user") or {}).get("login") == "github-actions[bot]" and MARKER in (comment.get("body") or "")
 

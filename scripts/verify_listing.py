@@ -26,6 +26,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -39,11 +40,17 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def deployed_listing():
+    """The deployed listing, None if there is none yet (404); any other failure stops the check,
+    since without it a changed zip could not be detected."""
     try:
         with urllib.request.urlopen(DEPLOYED, timeout=20) as response:
             return json.load(response)
-    except Exception:
-        return None
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return None
+        sys.exit("::error::Could not download %s: %s" % (DEPLOYED, error))
+    except (OSError, ValueError) as error:
+        sys.exit("::error::Could not download %s: %s" % (DEPLOYED, error))
 
 
 def hashes(listing):
@@ -95,6 +102,8 @@ def rebuild(source, release_data, zip_name):
 
 def main():
     arguments = sys.argv[1:]
+    if not arguments:
+        sys.exit(__doc__)
     source = None
     if "--source" in arguments:
         index = arguments.index("--source")

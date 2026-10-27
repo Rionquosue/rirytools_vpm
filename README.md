@@ -30,13 +30,15 @@ In this repository:
 
 2. **Settings > Environments > github-pages:** add yourself under **Required reviewers**, and under **Deployment branches and tags** allow only `main`.
 
-3. **Settings > Secrets and variables > Actions > Variables:** `TRIPWIRE_HASHES`, the comma-separated tripwire hashes for the issue check.
+3. **Settings > Secrets and variables > Actions > Variables:** `TRIPWIRE_HASHES`, the comma-separated tripwire hashes for the issue check. Until it is set, the issue check fails and no issue is marked as passed.
 
 4. **Settings > Secrets and variables > Actions > Secrets:** delete `SOURCE_REPO_TOKEN`; it is no longer used.
 
 In `Rionquosue/riryunityworkflow`: delete `.github/workflows/notify-vpm.yml` and the `VPM_DISPATCH_TOKEN` secret, and revoke that token.
 
-To publish without waiting for the hourly check, run **Build Package** from this repository's Actions tab.
+To publish without waiting for the hourly check, run **Build Package** from this repository's Actions tab. If a release exists but its listing never deployed, run **Build Repo Listing** by hand.
+
+GitHub turns off scheduled workflows in public repositories after 60 days without activity and emails the owner. Re-enable **Build Package** and **Audit Listing** from the Actions tab if that happens.
 
 ## Customizing the landing page
 
