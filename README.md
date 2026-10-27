@@ -16,7 +16,11 @@ Or open [the listing page](https://rionquosue.github.io/rirytools_vpm/) and pres
 
 3. It then runs [`build-listing.yml`](.github/workflows/build-listing.yml), VRChat's [package-list-action](https://github.com/vrchat-community/package-list-action) (pinned to a commit), which builds `index.json` and the landing page from the releases. [`scripts/verify_listing.py`](scripts/verify_listing.py) rejects any package other than `com.riry.rirytools`, any version whose release was not made by the build, and any zip whose SHA-256 differs. Each version not yet deployed must also be reproducible: the source commit named in its release notes must be on source `main`, and rebuilding it must give the identical zip. It writes a summary of what will be served.
 
-4. The deploy job waits in the `github-pages` environment for the owner's approval. Read the summary on the run page, then approve.
+4. The check runs in its own job, on the exact artifact that will be deployed. A version already deployed with a different SHA-256 is rejected: a published zip never changes.
+
+5. The deploy job waits in the `github-pages` environment for the owner's approval. Read the summary on the run page, then approve.
+
+6. Every day, [`audit-listing.yml`](.github/workflows/audit-listing.yml) checks the deployed listing the same way, rebuilding every version. A failed audit means a published zip changed.
 
 ## Setup
 
