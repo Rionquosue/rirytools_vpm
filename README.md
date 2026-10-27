@@ -14,7 +14,7 @@ Or open [the listing page](https://rionquosue.github.io/rirytools_vpm/) and pres
 
 2. It never reuses or overwrites a release it did not make: [`scripts/verify_release.py`](scripts/verify_release.py) requires the release and both assets to come from `github-actions[bot]` and the zip to match the build, and the run fails otherwise.
 
-3. It then runs [`build-listing.yml`](.github/workflows/build-listing.yml), VRChat's [package-list-action](https://github.com/vrchat-community/package-list-action) (pinned to a commit), which builds `index.json` and the landing page from the releases. [`scripts/verify_listing.py`](scripts/verify_listing.py) rejects any package other than `com.riry.rirytools`, any version whose release was not made by the build, and any zip whose SHA-256 differs, and writes a summary of what will be served.
+3. It then runs [`build-listing.yml`](.github/workflows/build-listing.yml), VRChat's [package-list-action](https://github.com/vrchat-community/package-list-action) (pinned to a commit), which builds `index.json` and the landing page from the releases. [`scripts/verify_listing.py`](scripts/verify_listing.py) rejects any package other than `com.riry.rirytools`, any version whose release was not made by the build, and any zip whose SHA-256 differs. Each version not yet deployed must also be reproducible: the source commit named in its release notes must be on source `main`, and rebuilding it must give the identical zip. It writes a summary of what will be served.
 
 4. The deploy job waits in the `github-pages` environment for the owner's approval. Read the summary on the run page, then approve.
 
