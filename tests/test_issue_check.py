@@ -228,4 +228,14 @@ s = Store(issue("[Bug]: x", clean_bug, ["bug"]), [])
 for i, who in enumerate(["other", "stranger", "other", "stranger"]):
     s.comments.append(comment(97000 + i, "see example.com", who)); run(s, "created", who)
 check("strikes are per person", "held=0" in own(s) and "other:2" in own(s) and "stranger:2" in own(s))
+# Final round: entity, emphasis and regional-indicator spellings; labels limited in triage output.
+for name, text in [("emphasis", BAD.replace("instructions", "instruc**tions**")), ("entity", BAD.replace("instructions", "&#105;nstructions")),
+                   ("double entity", BAD.replace("instructions", "&amp;#105;nstructions")),
+                   ("regional indicators", "".join(chr(0x1F1E6 + ord(c) - 97) if c.isalpha() and c.islower() else c for c in BAD.lower()))]:
+    check("evasion caught: " + name, "override" in ic.scan(text))
+for text in ["snake_case_name and __init__ and ~/tmp", "Japan \U0001F1EF\U0001F1F5 and US \U0001F1FA\U0001F1F8 flags", "A &amp; B &lt;3"]:
+    check("no false positive: " + text[:20], ic.scan(text) == [])
+s = Store(issue("[Bug]: x", clean_bug, ["bug"]), []); run(s, "opened")
+s.issue["labels"].append({"name": "made-up label text"}); code, out = triage(s)
+check("triage prints only known labels", code == 0 and "made-up" not in out)
 print("\n%d/%d passed" % (sum(results), len(results)))

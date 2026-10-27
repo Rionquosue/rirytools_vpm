@@ -20,6 +20,7 @@ assigned to every flagged issue. After %d flagged edits by the same person, or
 when a tripwire code is found, the flag is held until the owner reviews it.
 """ % 3
 import hashlib
+import html
 import json
 import os
 import re
@@ -189,8 +190,10 @@ def unusual_characters(text):
 
 
 def normalize(text):
-    """NFKC (styled and fullwidth letters become plain), combining marks and hidden characters removed,
-    lowercased, spaces collapsed."""
+    """HTML entities decoded, NFKC (styled and fullwidth letters become plain), regional-indicator
+    letters read as letters, combining marks and hidden characters removed, lowercased, spaces collapsed."""
+    text = html.unescape(html.unescape(text))
+    text = "".join(chr(ord(c) - 0x1F1E6 + ord("a")) if 0x1F1E6 <= ord(c) <= 0x1F1FF else c for c in text)
     text = unicodedata.normalize("NFD", unicodedata.normalize("NFKC", text))
     text = "".join(c for c in text if ord(c) in (0x09, 0x0A, 0x0D) or not (
         unicodedata.category(c) in ("Mn", "Me") or in_ranges(ord(c), HIDDEN_RANGES) or ord(c) == ZERO_WIDTH_JOINER))
@@ -355,7 +358,9 @@ def scan(text):
     text = text or ""
     found = set()
     unquoted = QUOTE_PREFIX.sub("", text)
+    # Markdown emphasis inside a word ("instruc**tions**") still renders as the plain word.
     plain = normalize(text) + "\n" + normalize(unquoted)
+    plain += "\n" + re.sub(r"(?<=\w)[*_~]+|[*_~]+(?=\w)", "", plain)
     nfkc = unicodedata.normalize("NFKC", text)
     for name, patterns in PATTERNS.items():
         if any(p.search(plain) for p in patterns):
