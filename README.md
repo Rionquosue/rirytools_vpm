@@ -33,3 +33,16 @@ To publish without a push, run **Build Package** from this repository's Actions 
 ## Customizing the landing page
 
 The `Website` folder is the landing page template; `build-listing.yml` fills it in from `source.json`.
+
+## Issues
+
+Feature requests and bug reports use the forms in `.github/ISSUE_TEMPLATE`. [`issue-check.yml`](.github/workflows/issue-check.yml) runs [`scripts/issue_check.py`](scripts/issue_check.py) on every issue and comment change. It flags links, instruction-override phrases, AI-directed text, prompt markup, requests for secrets or commands, HTML and CSS, math formatting, styled or hidden characters, look-alike letters, encoded data and very long text. It also checks the forms' required sections, and comments with what to fix.
+
+Labels:
+
+1. `issue-check: passed`: every check passed. Scheduled issue triage reads only issues with this label. It is removed at the start of every run, so a failed run leaves the issue unread.
+2. `security: flagged`: the issue or a comment failed a security check.
+3. `security: reviewed`: add it yourself to clear a false positive. It is removed whenever someone other than the owner changes the issue or comments.
+4. `needs clarification`: required form sections are missing.
+
+Text from the owner, members and collaborators is not security-checked.

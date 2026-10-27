@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest a new RiryTools feature or a change to an existing tool.
+title: "[Feature]: "
+labels: ["feature request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Goals and Behaviour are required; Scope and Approach are optional. Plain text only: no links, images, HTML or special fonts. Requests with them are flagged automatically.
+  - type: textarea
+    id: goals
+    attributes:
+      label: Goals
+      description: What should this let you do, and why?
+    validations:
+      required: true
+  - type: textarea
+    id: behaviour
+    attributes:
+      label: Behaviour
+      description: What do you do, and what do you see or get?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: Which tool or part of RiryTools it affects (optional).
+  - type: textarea
+    id: approach
+    attributes:
+      label: Approach
+      description: How you imagine it working, if you have an idea (optional).
