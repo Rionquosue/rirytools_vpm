@@ -24,6 +24,7 @@ import json
 import os
 import re
 import sys
+import time
 import unicodedata
 import urllib.error
 import urllib.parse
@@ -43,6 +44,10 @@ MAX_LENGTH = 8000
 MAX_COMMENTS = 1000
 HOLD_AFTER = 3
 MAX_JOINED = 200000
+TIME_BUDGET = 300
+# Checks that do not apply to maintainers' own text (their links, paths and formatting are trusted);
+# everything aimed at an AI reader still does, since a maintainer may relay outsider text.
+MAINTAINER_EXEMPT = {"links", "lookup", "paths", "html", "math", "encoded", "length"}
 # Comma-separated SHA-256 hashes of 12-character tripwire codes (lowercase letters and
 # digits), from the TRIPWIRE_HASHES Actions variable so they are not in the repository.
 TRIPWIRES = {h.strip().lower() for h in os.environ.get("TRIPWIRE_HASHES", "").split(",") if h.strip()}
@@ -67,7 +72,7 @@ CHECKS = {
     "review": "Text that needs maintainer review",
     "encoded": "Long encoded data (base64 or hex)",
     "length": "More than %d characters" % MAX_LENGTH,
-    "volume": "More than %d comments, which is more than this check reads" % MAX_COMMENTS,
+    "volume": "Too much text to check (more than %d comments or %d characters in all)" % (MAX_COMMENTS, MAX_JOINED),
 }
 
 FEATURE_TEMPLATE = """### Goals
@@ -236,11 +241,11 @@ PATTERNS = {
         rx(r"\bwww\d{0,3}\."),
         rx(r"\b(?:mailto|javascript|vbscript):|\bdata:[a-z]+/[a-z0-9.+\-]+[;,]"),
         rx(r"\]\(\s*[^)\s]"),
-        rx(r"(?m)^\s*\[[^\]\n]+\]:\s*\S"),
+        rx(r"(?m)^[ \t]*\[[^\]\n]+\]:[ \t]*\S"),
         rx(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
         rx(r"\[[0-9a-f:]*::?[0-9a-f:]*\]|\b[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){7}\b|\b[0-9a-f]{1,4}::[0-9a-f]{1,4}\b"),
-        rx(r"\b[\w.+\-]+@[a-z0-9\-]+(?:\.[a-z0-9\-]+)*\.[a-z]{2,}\b"),
-        rx(r"\bhxxps?\b|\[\s*\.\s*\]|[\[(]\s*dot\s*[\])]|\s+dot\s+(?:com|net|org|io|dev|app|ru|cn)\b"),
+        rx(r"[\w.+\-]{1,64}@[a-z0-9\-]{1,63}(?:\.[a-z0-9\-]{1,63}){0,8}\.[a-z]{2,24}\b"),
+        rx(r"\bhxxps?\b|\[\s*\.\s*\]|[\[(][ \t]{0,3}dot[ \t]{0,3}[\])]|[ \t]{1,5}dot[ \t]{1,5}(?:com|net|org|io|dev|app|ru|cn)\b"),
     ],
     "lookup": [
         rx(r"\b(?:visit|browse|go to|navigate to|look up|lookup|check out|fetch|download|search|google|follow|click|open)\b"
@@ -270,9 +275,9 @@ PATTERNS = {
         rx(r"<\|[^|>\n]{1,40}\|>|\[/?inst\]|<</?sys>>"),
         rx(r"</?\s*(?:system|assistant|user|human|instructions?|prompt|context|tool_?(?:call|result|use)s?|"
            r"function_?(?:calls?|results?)|antml[^>]*|im_start|im_end)\s*>"),
-        rx(r"(?m)^\s*(?:system|assistant|human|ai)\s*:"),
+        rx(r"(?m)^[ \t]*(?:system|assistant|human|ai)[ \t]*:"),
         rx(r"\b(?:begin|end|start)\s+(?:of\s+)?(?:the\s+)?(?:system|prompt|instructions?)\b"),
-        rx(r"(?m)^\s*#{1,6}\s*(?:system|instructions?|response|assistant)\b"),
+        rx(r"(?m)^[ \t]*#{1,6}[ \t]*(?:system|instructions?|response|assistant)\b"),
     ],
     "secrets": [
         rx(r"\b(?:%s)\b[^.\n]{0,60}\b(?:%s)" % (SECRET_VERBS, SECRET_NOUNS)),
@@ -319,15 +324,20 @@ FORMAT_PATTERNS = {
 }
 # Math that uses code syntax, so it is matched before the code is stripped.
 MATH_CODE = rx(r"(?m)^[ \t]*(?:```|~~~)\s*math\b|\$`")
-DOMAIN = rx(r"\b(?:[a-z0-9](?:[a-z0-9\-]{0,61}[a-z0-9])?\.)+(%s)\b" % TLDS, re.IGNORECASE)
+DOMAIN_TOKEN = rx(r"[A-Za-z0-9][A-Za-z0-9.\-]*")
+DOMAIN_LABEL = rx(r"[A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?")
+TLD_SET = set(TLDS.split("|"))
 UPPER_TLDS = {"com", "net", "org", "dev", "app", "xyz", "ru", "cn", "info", "site", "online", "top", "link", "click"}
 
 
 def has_domain(text):
-    """A domain with a listed TLD, ignoring all-caps endings like "System.IO" that read as code."""
-    for match in DOMAIN.finditer(text):
-        tld = match.group(1)
-        if not tld.isupper() or tld.lower() in UPPER_TLDS:
+    """A domain with a listed TLD, ignoring all-caps endings like "System.IO" that read as code.
+    Works token by token so the time stays linear in the text length."""
+    for match in DOMAIN_TOKEN.finditer(text):
+        labels = match.group(0).rstrip(".-").split(".")
+        if len(labels) < 2 or labels[-1].lower() not in TLD_SET or not DOMAIN_LABEL.fullmatch(labels[-2]):
+            continue
+        if not labels[-1].isupper() or labels[-1].lower() in UPPER_TLDS:
             return True
     return False
 BASE64 = rx(r"[A-Za-z0-9+/]{80,}={0,2}")
@@ -336,22 +346,27 @@ LATIN = rx(r"[A-Za-z]")
 LOOKALIKE = rx(r"[\u0370-\u03FF\u0400-\u04FF]")
 
 
+QUOTE_PREFIX = rx(r"(?m)^[ \t]*(?:(?:>|[-*+]|\d{1,3}[.)])[ \t]*)+")
+
+
 def scan(text):
-    """Names of the CHECKS that text fails, in CHECKS order."""
+    """Names of the CHECKS that text fails, in CHECKS order. Line-start checks also see each line
+    with quote and list markers ("> ", "- ", "1. ") removed."""
     text = text or ""
     found = set()
-    plain = normalize(text)
+    unquoted = QUOTE_PREFIX.sub("", text)
+    plain = normalize(text) + "\n" + normalize(unquoted)
     nfkc = unicodedata.normalize("NFKC", text)
     for name, patterns in PATTERNS.items():
         if any(p.search(plain) for p in patterns):
             found.add(name)
     if has_domain(nfkc.replace("\u3002", ".").replace("\uff61", ".")):
         found.add("links")
-    outside = strip_code(text)
+    outside = strip_code(text) + "\n" + strip_code(unquoted)
     for name, patterns in FORMAT_PATTERNS.items():
         if any(p.search(outside) for p in patterns):
             found.add(name)
-    if MATH_CODE.search(text):
+    if MATH_CODE.search(text) or MATH_CODE.search(unquoted):
         found.add("math")
     if any(in_ranges(ord(c), STYLED_RANGES) for c in text):
         found.add("fonts")
@@ -402,12 +417,15 @@ def issue_type(issue):
     return next((t for t in ISSUE_TYPES if t["label"] in names or title.startswith(t["prefix"])), None)
 
 
-def report(findings, missing, kind, fingerprint, strikes, held):
+def report(findings, missing, kind, fingerprint, strikes, held, reviewed=False):
     """The bot comment for these results, or None when everything passes and there is no state to keep."""
     if not findings and not missing and not strikes and not held:
         return None
-    lines = [MARKER, "<!-- state strikes=%d held=%d -->" % (strikes, int(held)), "**Automated issue check**", ""]
-    if held:
+    state = ",".join("%s:%d" % item for item in sorted(strikes.items()))
+    lines = [MARKER, "<!-- state strikes=%s held=%d -->" % (state, int(held)), "**Automated issue check**", ""]
+    if reviewed:
+        lines += ["The owner reviewed the current text. Any change to it needs a new review.", ""]
+    elif held:
         lines += ["This issue is held for maintainer review. Edits will not clear it.", ""]
     elif findings:
         lines += ["This issue is labelled `%s` and will not be reviewed until the text below is fixed. "
@@ -420,7 +438,7 @@ def report(findings, missing, kind, fingerprint, strikes, held):
         needed = ", ".join(missing[:-1]) + " and " + missing[-1] if len(missing) > 1 else missing[0]
         lines += ["This %s needs %s before it can be reviewed. Details beyond that are not required. "
                   "Please edit the issue so it includes:" % (kind["name"], needed), "", "```markdown", kind["template"], "```", ""]
-    if not findings and not missing:
+    if not findings and not missing and not reviewed:
         lines += ["All checks pass.", ""]
     if findings:
         lines.append("Owner: to clear this after reading the issue and every comment, post a comment that is exactly "
@@ -506,11 +524,6 @@ def readable_comments(comments):
     return [c for c in comments if not is_own_report(c) and review_of(c) is None]
 
 
-def quoted(text):
-    """Quoted lines ("> ...") of a maintainer's text, which may repeat outsider text."""
-    return "\n".join(line for line in (text or "").splitlines() if line.lstrip().startswith(">"))
-
-
 def issue_text(issue):
     # The form's "[Feature]: " or "[Bug]: " title prefix reads like a Markdown link reference.
     title = re.sub(r"^\s*\[(?:feature|bug)\]:\s*", "", issue.get("title") or "", flags=re.IGNORECASE)
@@ -525,33 +538,40 @@ def content_fingerprint(issue, comments):
     return hashlib.sha256(json.dumps(data, ensure_ascii=True).encode("ascii")).hexdigest()
 
 
+def login_of(item):
+    return (item.get("user") or {}).get("login") or "a deleted user"
+
+
 def check_texts(issue, comments, complete):
-    """Findings for an issue as (where, check names, author login) tuples. Outsider text is scanned in
-    full and maintainer text only where it quotes; the conversation is also scanned as one text."""
+    """Findings for an issue as (where, check names, author login) tuples. Every readable text is
+    scanned; maintainers' text skips MAINTAINER_EXEMPT. The conversation is also scanned as one
+    text, and an over-long conversation or a run past TIME_BUDGET fails closed."""
     findings = []
     texts = []
-
-    def check(where, text, author):
+    started = time.monotonic()
+    items = [("The issue", issue_text(issue), issue)] + [
+        ("Comment from %s (%s)" % (login_of(c), c.get("html_url")), c.get("body") or "", c) for c in readable_comments(comments)]
+    for where, text, item in items:
+        if time.monotonic() - started > TIME_BUDGET:
+            findings.append(("The conversation", ["volume"], None))
+            return findings
         # Over-long text is flagged without scanning, which keeps every run short.
         names = ["length"] if len(text) > MAX_LENGTH else scan(text)
+        if is_maintainer(item):
+            names = [n for n in names if n not in MAINTAINER_EXEMPT]
         texts.append(text[:MAX_LENGTH])
         if names:
-            findings.append((where, names, author))
-
-    login = (issue.get("user") or {}).get("login")
-    check("The issue", quoted(issue_text(issue)) if is_maintainer(issue) else issue_text(issue), login)
-    for comment in readable_comments(comments):
-        body = comment.get("body") or ""
-        check("Comment from %s (%s)" % (comment["user"]["login"], comment["html_url"]),
-              quoted(body) if is_maintainer(comment) else body, comment["user"]["login"])
+            findings.append((where, names, login_of(item)))
     # Text split across lines or comments is read together by the triage agent.
-    joined = " ".join(re.sub(r"\s+", " ", t) for t in texts if t)[:MAX_JOINED]
-    seen = {name for _, names, _ in findings for name in names}
-    whole = [n for n in scan(joined) if n not in seen and n != "length"] if not findings else []
-    if "review" not in seen and "review" not in whole and tripwire(joined):
-        whole.append("review")
-    if whole:
-        findings.append(("The conversation as a whole", whole, None))
+    joined = " ".join(re.sub(r"\s+", " ", t) for t in texts if t)
+    if len(joined) > MAX_JOINED:
+        findings.append(("The conversation as a whole", ["volume"], None))
+    else:
+        whole = [n for n in scan(joined) if n not in MAINTAINER_EXEMPT]
+        if "review" not in whole and tripwire(joined):
+            whole.append("review")
+        if whole:
+            findings.append(("The conversation as a whole", whole, None))
     if not complete:
         findings.append(("The comments", ["volume"], None))
     return findings
@@ -575,21 +595,27 @@ def main():
     comments, complete = github.comments(number)
     own = next((c for c in comments if is_own_report(c)), None)
     fingerprint = content_fingerprint(issue, comments)
-    state = re.search(r"<!-- state strikes=(\d+) held=([01]) -->", (own or {}).get("body") or "")
-    strikes, held = (int(state.group(1)), state.group(2) == "1") if state else (0, False)
+    state = re.search(r"<!-- state strikes=([\w\-\[\]:,]*) held=([01]) -->", (own or {}).get("body") or "")
+    strikes = {}
+    if state:
+        for entry in filter(None, state.group(1).split(",")):
+            who, _, count = entry.rpartition(":")
+            if who and count.isdigit():
+                strikes[who] = int(count)
+    held = bool(state) and state.group(2) == "1"
 
-    findings = check_texts(issue, comments, complete)
     # The owner's latest review covers exactly the text it names; any change gives a new fingerprint.
+    # It is checked first, so the owner can always clear an issue, however slow it is to scan.
     reviewed = latest_review(comments) == fingerprint
-    if reviewed:
-        findings, strikes, held = [], 0, False
-    else:
+    findings = [] if reviewed else check_texts(issue, comments, complete)
+    if not reviewed:
         authors = {author for _, _, author in findings}
+        login = sender.get("login") or ""
         # A strike counts against whoever changed flagged text, not bystanders who comment after it.
-        if (findings and sender.get("login") != owner and action in ("opened", "edited", "created", "reopened")
-                and (sender.get("login") in authors or None in authors)):
-            strikes += 1
-        if any("review" in names for _, names, _ in findings) or strikes >= HOLD_AFTER:
+        if (findings and login != owner and action in ("opened", "edited", "created", "reopened")
+                and (login in authors or None in authors)):
+            strikes[login] = strikes.get(login, 0) + 1
+        if any("review" in names for _, names, _ in findings) or any(n >= HOLD_AFTER for n in strikes.values()):
             held = True
         if held:
             findings = findings or [("The issue", ["review"], None)]
@@ -604,7 +630,7 @@ def main():
     github.set_label(number, labels, REVIEWED, reviewed)
     github.set_label(number, labels, CLARIFY, bool(missing))
 
-    body = report(findings, missing, kind, fingerprint, strikes, held)
+    body = report(findings, missing, kind, fingerprint, strikes, held, reviewed)
     if body and own and own["body"] != body:
         github.call("PATCH", "/issues/comments/%d" % own["id"], {"body": body})
     elif body and not own:
