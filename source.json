@@ -1,28 +1,18 @@
 {
-    "name":"Example Listing",
-    "id":"com.vrchat.example-listing",
-    "url":"https://vrchat-community.github.io/template-package-listing/index.json",
-    "author":{
-        "email":"developer@vrchat.com",
-        "name":"VRChat",
-        "url":"https://hello.vrchat.com"
+    "name": "RiryTools",
+    "id": "com.riry.vpm",
+    "url": "https://rionquosue.github.io/rirytools_vpm/index.json",
+    "author": {
+        "name": "Riry",
+        "url": "https://github.com/Rionquosue"
     },
-    "description":"Example listing of VRChat packages",
-    "infoLink":{
-        "url":"http://github.com/vrchat-community/template-package-listing",
-        "text":"View on GitHub"
+    "description": "Editor tools for Unity avatar and game projects.",
+    "infoLink": {
+        "url": "https://github.com/Rionquosue/rirytools_vpm",
+        "text": "View on GitHub"
     },
-    "bannerUrl":"banner.png",
-    "githubRepos":[
-        "vrchat-community/clientsim"
-    ],
-    "packages":[
-        {
-            "name":"com.vrchat.udonsharp",
-            "releases":[
-                "https://github.com/vrchat-community/UdonSharp/releases/download/1.1.7/com.vrchat.UdonSharp.zip",
-                "https://github.com/vrchat-community/UdonSharp/releases/download/1.1.6/com.vrchat.UdonSharp-1.1.6.zip"
-            ]
-        }
+    "bannerUrl": "banner.png",
+    "githubRepos": [
+        "Rionquosue/rirytools_vpm"
     ]
 }

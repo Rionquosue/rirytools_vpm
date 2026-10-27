@@ -1,0 +1,76 @@
+# Builds the RiryTools VPM package whenever the source repository's main branch
+# changes, publishes it as a release of this repository, then runs
+# build-listing.yml so the listing (index.json on GitHub Pages) includes it.
+#
+# Secret SOURCE_REPO_TOKEN (Settings > Secrets and variables > Actions): a
+# fine-grained token with Contents: Read-only on the source repository.
+name: Build Package
+
+on:
+  repository_dispatch:
+    types: [source-updated]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Source branch, tag or commit to build
+        default: main
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: build-package
+  cancel-in-progress: false
+
+env:
+  SOURCE_REPOSITORY: Rionquosue/riryunityworkflow
+
+jobs:
+  build-package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@v4
+
+      # The source repository is fixed above, so a dispatch can only choose which commit to build.
+      - name: Check out the source repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPOSITORY }}
+          ref: ${{ github.event.client_payload.sha || inputs.ref || 'main' }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          path: source
+          lfs: true
+
+      - name: Build the package
+        id: build
+        run: python3 scripts/build_vpm.py build --source source --repository "${{ github.repository }}"
+
+      # A version is published once; the same source always gives the same zip.
+      - name: Publish the release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ steps.build.outputs.tag }}"
+          zip="${{ steps.build.outputs.zip }}"
+          if gh release view "$tag" --json assets --jq '.assets[].name' 2>/dev/null | grep -qxF "$(basename "$zip")"; then
+            echo "${{ steps.build.outputs.name }} ${{ steps.build.outputs.version }} is already released. Bump \"version\" in package.json to publish a new one."
+            exit 0
+          fi
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release upload "$tag" "$zip" dist/package.json --clobber
+          else
+            gh release create "$tag" "$zip" dist/package.json \
+              --title "${{ steps.build.outputs.name }} ${{ steps.build.outputs.version }}" \
+              --notes "Built from ${{ env.SOURCE_REPOSITORY }}@$(git -C source rev-parse --short HEAD)."
+          fi
+          echo "published=true" >> "$GITHUB_OUTPUT"
+
+      # Releases made with the workflow token do not start other workflows, so start the listing build here.
+      - name: Rebuild the listing
+        if: steps.release.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build-listing.yml --ref "${{ github.event.repository.default_branch }}"
