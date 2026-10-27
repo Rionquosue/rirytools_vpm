@@ -14,17 +14,27 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import zipfile
 
+PACKAGE_NAME = "com.riry.rirytools"
+VERSION = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?")
+LFS_POINTER = b"version https://git-lfs.github.com/spec/"
 # Top-level entries of the source repository that are not part of the package.
 EXCLUDED_TOP_LEVEL = {"Docs~", "TestProject~"}
 FIXED_TIME = (2020, 1, 1, 0, 0, 0)
 
 
 def read_manifest(source):
+    """The source package.json. Its name and version end up in tags, file names and workflow
+    outputs, so only the expected name and a plain semantic version are accepted."""
     with open(os.path.join(source, "package.json"), encoding="utf-8") as handle:
-        return json.load(handle)
+        manifest = json.load(handle)
+    if manifest.get("name") != PACKAGE_NAME or not isinstance(manifest.get("version"), str) or \
+            not VERSION.fullmatch(manifest["version"]):
+        sys.exit("package.json must have name %s and a version like 1.2.3." % PACKAGE_NAME)
+    return manifest
 
 
 def package_files(source):
@@ -38,8 +48,20 @@ def package_files(source):
             names = [n for n in names if not n.startswith(".")]
         else:
             directories[:] = [d for d in directories if d != ".git"]
+        for directory in directories:
+            if os.path.islink(os.path.join(root, directory)):
+                sys.exit("%s is a symbolic link; the package may not contain links." % os.path.join(relative_root, directory))
         for name in names:
-            files.append(os.path.normpath(os.path.join(relative_root, name)).replace(os.sep, "/"))
+            relative = os.path.normpath(os.path.join(relative_root, name)).replace(os.sep, "/")
+            path = os.path.join(source, relative)
+            # A symlink could pull in files from outside the checkout; an LFS pointer means the
+            # real file was not fetched, so the zip would not match a proper build.
+            if os.path.islink(path):
+                sys.exit("%s is a symbolic link; the package may not contain links." % relative)
+            with open(path, "rb") as handle:
+                if handle.read(len(LFS_POINTER)) == LFS_POINTER:
+                    sys.exit("%s is a Git LFS pointer; check out with LFS." % relative)
+            files.append(relative)
     return sorted(files)
 
 

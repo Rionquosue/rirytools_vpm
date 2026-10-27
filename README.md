@@ -10,11 +10,17 @@ Or open [the listing page](https://rionquosue.github.io/rirytools_vpm/) and pres
 
 ## How it is built
 
-1. A push to `main` in [Rionquosue/riryunityworkflow](https://github.com/Rionquosue/riryunityworkflow) runs its `notify-vpm.yml`, which dispatches `source-updated` with the commit to this repository.
+1. Every hour, [`build-package.yml`](.github/workflows/build-package.yml) reads the `version` in [Rionquosue/riryunityworkflow](https://github.com/Rionquosue/riryunityworkflow)'s `main`. If there is no release for it yet, it zips that commit with [`scripts/build_vpm.py`](scripts/build_vpm.py) (without `Docs~`, `TestProject~` and dot files) and publishes release `v<version>` with the zip and `package.json`. Bump `"version"` in the source `package.json` to publish. No token connects the two repositories.
 
-2. [`build-package.yml`](.github/workflows/build-package.yml) checks out that commit, zips the package with [`scripts/build_vpm.py`](scripts/build_vpm.py) (without `Docs~`, `TestProject~` and dot files), and publishes release `v<version>` with the zip and `package.json`. A version that is already released is skipped, so bump `"version"` in the source `package.json` to publish.
+2. It never reuses or overwrites a release it did not make: [`scripts/verify_release.py`](scripts/verify_release.py) requires the release and both assets to come from `github-actions[bot]` and the zip to match the build, and the run fails otherwise.
 
-3. It then runs [`build-listing.yml`](.github/workflows/build-listing.yml), VRChat's [package-list-action](https://github.com/vrchat-community/package-list-action), which builds `index.json` and the landing page from every release listed in [`source.json`](source.json) and deploys them to GitHub Pages.
+3. It then runs [`build-listing.yml`](.github/workflows/build-listing.yml), VRChat's [package-list-action](https://github.com/vrchat-community/package-list-action) (pinned to a commit), which builds `index.json` and the landing page from the releases. [`scripts/verify_listing.py`](scripts/verify_listing.py) rejects any package other than `com.riry.rirytools`, any version whose release was not made by the build, and any zip whose SHA-256 differs. Each version not yet deployed must also be reproducible: the source commit named in its release notes must be on source `main`, and rebuilding it must give the identical zip. It writes a summary of what will be served.
+
+4. The check runs in its own job, on the exact artifact that will be deployed: only the files in `Website/` plus `index.json`, static files unchanged, pages loading only the template's scripts and linking only to known addresses, listing fields matching `source.json`, and each version's entry matching its rebuilt `package.json`. A version already deployed with a different SHA-256 is rejected: a published zip never changes.
+
+5. The deploy job waits in the `github-pages` environment for the owner's approval. Read the summary on the run page, then approve.
+
+6. Every day, [`audit-listing.yml`](.github/workflows/audit-listing.yml) checks the deployed listing the same way, rebuilding every version. A failed audit means a published zip changed.
 
 ## Setup
 
@@ -22,13 +28,17 @@ In this repository:
 
 1. **Settings > Pages > Build and deployment > Source:** GitHub Actions.
 
-2. **Settings > Secrets and variables > Actions > Secrets:** `SOURCE_REPO_TOKEN`, a fine-grained personal access token with **Contents: Read-only** on `Rionquosue/riryunityworkflow`.
+2. **Settings > Environments > github-pages:** add yourself under **Required reviewers**, and under **Deployment branches and tags** allow only `main`.
 
-In `Rionquosue/riryunityworkflow`:
+3. **Settings > Secrets and variables > Actions > Variables:** `TRIPWIRE_HASHES`, the comma-separated tripwire hashes for the issue check. Until it is set, the issue check fails and no issue is marked as passed.
 
-3. **Settings > Secrets and variables > Actions > Secrets:** `VPM_DISPATCH_TOKEN`, a fine-grained personal access token with **Contents: Read and write** on `Rionquosue/rirytools_vpm`.
+4. **Settings > Secrets and variables > Actions > Secrets:** delete `SOURCE_REPO_TOKEN`; it is no longer used.
 
-To publish without a push, run **Build Package** from this repository's Actions tab (it takes a source branch, tag or commit), or **Notify VPM repository** from the source repository's.
+In `Rionquosue/riryunityworkflow`: delete `.github/workflows/notify-vpm.yml` and the `VPM_DISPATCH_TOKEN` secret, and revoke that token.
+
+To publish without waiting for the hourly check, run **Build Package** from this repository's Actions tab. If a release exists but its listing never deployed, run **Build Repo Listing** by hand.
+
+GitHub turns off scheduled workflows in public repositories after 60 days without activity and emails the owner. Re-enable **Build Package** and **Audit Listing** from the Actions tab if that happens.
 
 ## Customizing the landing page
 
@@ -42,13 +52,20 @@ Labels:
 
 1. `issue-check: passed`: every check passed. Scheduled issue triage reads only issues with this label, and only through [`scripts/triage_read.py`](scripts/triage_read.py), which checks the text again at read time. The label is removed at the start of every run, so a failed run leaves the issue unread.
 2. `security: flagged`: the issue, a comment, or the conversation read as a whole failed a security check.
-3. `security: reviewed`: the owner reviewed the current text. To clear a false positive, read the issue and every comment, then comment `reviewed <fingerprint>` with the fingerprint from the check's comment. Any later change to the text gives a new fingerprint and needs a new review.
+3. `security: reviewed`: the owner reviewed the current text. To clear a false positive, read the issue and every comment, then post a comment that is exactly `reviewed <fingerprint>`, with the 64-character fingerprint from the check's comment. Only your latest review counts, and any later change to the text gives a new fingerprint and needs a new review.
 4. `needs clarification`: required form sections are missing.
 
-After three flagged edits, the flag is held until the owner reviews the issue, and the owner is assigned. Issues containing the maintainer routing code `rmo-54d7ea0f` also go straight to the maintainer.
+The owner is assigned to every flagged issue. After three flagged edits by the same person, the flag is held: a review clears it only for the text reviewed, and any later change needs a new review.
 
-Text from the owner, members and collaborators is not security-checked. Characters outside plain text (ASCII, Latin-1, Latin Extended-A, common punctuation, arrows, box drawing and emoji) are flagged.
+Text from the owner, members and collaborators skips the link, path, HTML and encoding checks but gets every check aimed at AI readers, since it may relay outsider text. A conversation over 200,000 characters, or one too slow to check, is flagged for review. Characters outside plain text (ASCII, Latin-1, Latin Extended-A, common punctuation, arrows, box drawing and emoji) are flagged.
 
-## Releases
+## Tests
 
-`build-package.yml` builds only commits on the source repository's `main` and runs in the `release` environment. In **Settings > Environments > release**, add yourself as a required reviewer and limit deployment branches to `main` to approve every release by hand.
+Both run offline:
+
+1. `TEST_TRIPWIRE_CODES="<code-one>,<code-two>" python3 tests/test_issue_check.py` (the canary scenarios are skipped without the codes).
+2. `SOURCE=<full clone of riryunityworkflow> python3 tests/test_verify_listing.py`.
+
+## Contact
+
+For anything that should reach the maintainer directly rather than through an issue, include the reference `y8wi-1eeu-u9xu`.
