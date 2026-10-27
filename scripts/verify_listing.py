@@ -12,7 +12,11 @@ commit must be on the source repository's main, and rebuilding it must give the
 same zip. It writes a summary of what will be served for the owner to read
 before approving the deployment.
 
-Usage: python3 scripts/verify_listing.py Website/index.json [--source <full clone of the source repository>]
+A version already deployed with a different SHA-256 is rejected: a published zip
+must never change.
+
+Usage: python3 scripts/verify_listing.py <index.json> [--source <full clone of the source repository>]
+       python3 scripts/verify_listing.py --audit [--source ...]   checks the deployed listing itself
 """
 import hashlib
 import json
@@ -34,13 +38,17 @@ SOURCE_REPOSITORY = "Rionquosue/riryunityworkflow"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
-def deployed_versions():
+def deployed_listing():
     try:
         with urllib.request.urlopen(DEPLOYED, timeout=20) as response:
-            listing = json.load(response)
-        return {(n, v) for n, p in listing.get("packages", {}).items() for v in p.get("versions", {})}
+            return json.load(response)
     except Exception:
         return None
+
+
+def hashes(listing):
+    """(package, version) to zipSHA256 for a listing."""
+    return {(n, v): m.get("zipSHA256") for n, p in listing.get("packages", {}).items() for v, m in p.get("versions", {}).items()}
 
 
 def release(tag):
@@ -92,9 +100,16 @@ def main():
         index = arguments.index("--source")
         source = arguments[index + 1]
         del arguments[index:index + 2]
-    with open(arguments[0], encoding="utf-8") as handle:
-        listing = json.load(handle)
-    deployed = deployed_versions()
+    published = deployed_listing()
+    if arguments == ["--audit"]:
+        if published is None:
+            print("::error::Could not download %s" % DEPLOYED)
+            return 1
+        listing, deployed = published, None
+    else:
+        with open(arguments[0], encoding="utf-8") as handle:
+            listing = json.load(handle)
+        deployed = hashes(published) if published is not None else None
     found = []
     rows = []
     for name, package in sorted(listing.get("packages", {}).items()):
@@ -113,7 +128,15 @@ def main():
             if not re.fullmatch(r"[0-9a-f]{64}", sha):
                 issues.append("zipSHA256 is missing or malformed")
             data = release("v" + version)
-            status = "unknown" if deployed is None else "listed" if (name, version) in deployed else "NEW"
+            if deployed is None:
+                status = "unknown"
+            elif (name, version) not in deployed:
+                status = "NEW"
+            elif deployed[(name, version)] == sha:
+                status = "listed"
+            else:
+                status = "CHANGED"
+                issues.append("the deployed listing has a different SHA-256 for this version; a published zip must never change")
             if data is None:
                 issues.append("release v%s not found" % version)
             else:

@@ -41,6 +41,7 @@ jobs:
           ref: main
           path: source
           persist-credentials: false
+          lfs: true
 
       # A release this workflow did not make, or whose zip does not match, is never
       # reused or overwritten: the run fails so the owner can look at it.
@@ -96,16 +97,17 @@ jobs:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.build.outputs.tag }}
+          ZIP: ${{ steps.build.outputs.zip }}
+          TITLE: ${{ steps.build.outputs.name }} ${{ steps.build.outputs.version }}
         run: |
-          tag="${{ steps.build.outputs.tag }}"
-          if gh api "repos/${{ github.repository }}/releases/tags/$tag" > /dev/null 2>&1 ||
-             gh api "repos/${{ github.repository }}/git/ref/tags/$tag" > /dev/null 2>&1; then
-            echo "::error::$tag appeared since the check. Not touching it; review it by hand."; exit 1
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > /dev/null 2>&1 ||
+             gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" > /dev/null 2>&1; then
+            echo "::error::$TAG appeared since the check. Not touching it; review it by hand."; exit 1
           fi
-          gh release create "$tag" "${{ steps.build.outputs.zip }}" dist/package.json --target main \
-            --title "${{ steps.build.outputs.name }} ${{ steps.build.outputs.version }}" \
-            --notes "Built from ${{ env.SOURCE_REPOSITORY }}@$(git -C source rev-parse HEAD)."
-          gh api "repos/${{ github.repository }}/releases/tags/$tag" | python3 scripts/verify_release.py --zip "${{ steps.build.outputs.zip }}"
+          gh release create "$TAG" "$ZIP" dist/package.json --target main --title "$TITLE" \
+            --notes "Built from $SOURCE_REPOSITORY@$(git -C source rev-parse HEAD)."
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" | python3 scripts/verify_release.py --zip "$ZIP"
 
       # Releases made with the workflow token do not start other workflows, so start the listing build here.
       - name: Rebuild the listing
