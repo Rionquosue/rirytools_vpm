@@ -1,64 +1,86 @@
+# Builds the VPM listing (index.json and the landing page) from this repository's
+# releases with VRChat's package-list-action, checks it with
+# scripts/verify_listing.py, and deploys it to GitHub Pages.
+#
+# The deploy job uses the github-pages environment. Give that environment the
+# owner as a required reviewer and a main-only deployment branch rule: every
+# change to what VCC users download then waits for the owner's approval in the
+# GitHub UI, after reading the summary of what will be served.
 name: Build Repo Listing
 
-on: 
+on:
   workflow_dispatch:
   push:
     branches: main
     paths: source.json
 
-# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:
   contents: read
-  pages: write
-  id-token: write
-  
-# Allow one concurrent deployment
+
 concurrency:
   group: "pages"
-  cancel-in-progress: true
-  
+  cancel-in-progress: false
+
 env:
   listPublishDirectory: Website
   pathToCi: ci
 
 jobs:
-  
   build-listing:
-    name: build-listing
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: read
     steps:
-      
-      - uses: actions/checkout@v4 # check out this repo
-      - uses: actions/checkout@v4 # check out automation repo
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      # Pinned to a reviewed commit of the automation repository.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: vrchat-community/package-list-action
+          ref: cb31c3b5d17d1070d7741c61de2ca1b219224039
           path: ${{env.pathToCi}}
           clean: false # otherwise the local repo will no longer be checked out
-          
+          persist-credentials: false
+
       - name: Restore Cache
-        uses: actions/cache@v4
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: |
             ${{env.pathToCi}}/.nuke/temp
             ~/.nuget/packages
           key: ${{ runner.os }}-${{ hashFiles('**/global.json', '**/*.csproj') }}
-          
+
       - name: Build Package Version Listing
         run: ${{env.pathToCi}}/build.cmd BuildMultiPackageListing --root ${{env.pathToCi}} --list-publish-directory $GITHUB_WORKSPACE/${{env.listPublishDirectory}}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
- 
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Verify the listing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -I scripts/verify_listing.py ${{env.listPublishDirectory}}/index.json
+
       - name: Setup Pages
-        uses: actions/configure-pages@v5
-        
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
         with:
           path: ${{env.listPublishDirectory}}
-          
+
+  deploy:
+    needs: build-listing
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
