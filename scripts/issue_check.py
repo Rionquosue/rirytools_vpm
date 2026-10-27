@@ -10,10 +10,16 @@ Labels:
                        label. It is removed first on every run, so a failed run
                        leaves the issue unread.
   security: flagged    Text failed a security check.
-  security: reviewed   Added by the owner to clear a false positive. Removed again
-                       whenever someone other than the owner changes the text.
+  security: reviewed   The owner commented "reviewed <fingerprint>" for the current text.
+                       Set by this check; any change to the text gives a new fingerprint.
   needs clarification  A feature request or bug report is missing required sections.
-"""
+
+Text may contain only plain characters (ASCII, Latin-1, Latin Extended-A, common
+punctuation, arrows, box drawing and emoji); anything else is flagged. After
+%d flagged runs on one issue, or when a tripwire code is found, the flag is held
+until the owner reviews it, and the owner is assigned.
+""" % 3
+import hashlib
 import json
 import os
 import re
@@ -34,6 +40,14 @@ BUG = "bug"
 LABEL_COLORS = {PASSED: "0e8a16", FLAGGED: "b60205", REVIEWED: "5319e7", CLARIFY: "fbca04", FEATURE: "a2eeef", BUG: "d73a4a"}
 MAINTAINERS = {"OWNER", "MEMBER", "COLLABORATOR"}
 MAX_LENGTH = 8000
+MAX_COMMENTS = 1000
+HOLD_AFTER = 3
+# SHA-256 of tripwire codes. They only appear in text meant for automated readers, so
+# finding one means a tool generated or probed the issue. The codes stay unpublished here.
+TRIPWIRES = {
+    "dfc526e0eaaecf4ed7e350fc56ee3fc885c9930df630dd462baf7138747d33dc",
+    "7d65aa37c7a6ccab559239be1d59f52e97443ff3457d98c443b0ce6ae7b78c28",
+}
 
 CHECKS = {
     "links": "Links, web addresses, IP addresses or email addresses",
@@ -48,8 +62,13 @@ CHECKS = {
     "fonts": "Styled Unicode letters (bold, italic, fullwidth, circled, small caps) instead of plain text",
     "hidden": "Invisible, private-use or text-direction characters",
     "homoglyphs": "Words mixing Latin letters with look-alike Cyrillic or Greek letters",
+    "characters": "Characters outside plain text (other scripts, look-alike letters, combining marks, unusual spaces or symbols)",
+    "authority": "Claims of maintainer approval or of a policy change",
+    "paths": "Local configuration or credential paths (.git/config, .ssh, home folder dotfiles, /etc, /root)",
+    "review": "Text that needs maintainer review",
     "encoded": "Long encoded data (base64 or hex)",
     "length": "More than %d characters" % MAX_LENGTH,
+    "volume": "More than %d comments, which is more than this check reads" % MAX_COMMENTS,
 }
 
 FEATURE_TEMPLATE = """### Goals
@@ -118,6 +137,16 @@ STYLED_RANGES = [
     (0x1F100, 0x1F1E5),  # enclosed and squared letters (not the flag letters after them)
 ]
 ZERO_WIDTH_JOINER = 0x200D
+ALLOWED_RANGES = [
+    (0x0009, 0x000A), (0x000D, 0x000D), (0x0020, 0x007E),
+    (0x00A0, 0x00AC), (0x00AE, 0x00FF),          # Latin-1 without the soft hyphen
+    (0x0100, 0x0130), (0x0132, 0x017E),          # Latin Extended-A without dotless i and long s
+    (0x2010, 0x2015), (0x2018, 0x201F), (0x2022, 0x2022), (0x2026, 0x2026), (0x2030, 0x2030),
+    (0x2032, 0x2033), (0x20AC, 0x20AC), (0x2122, 0x2122), (0x2190, 0x21FF), (0x2212, 0x2212),
+    (0x2264, 0x2265), (0x2500, 0x257F),          # punctuation, euro, trademark, arrows, math, box drawing
+    (0x2600, 0x27BF), (0x2B00, 0x2BFF), (0x1F000, 0x1FAFF),  # emoji and symbols
+    (0xFE0F, 0xFE0F), (0x20E3, 0x20E3),          # emoji presentation and keycap
+]
 
 
 def in_ranges(code, ranges):
@@ -144,11 +173,31 @@ def hidden_characters(text):
     return False
 
 
+def unusual_characters(text):
+    """True for any character outside ALLOWED_RANGES, except a zero-width joiner inside an emoji sequence."""
+    for index, char in enumerate(text):
+        code = ord(char)
+        if code == ZERO_WIDTH_JOINER and 0 < index < len(text) - 1 and is_emoji(text[index - 1]) and is_emoji(text[index + 1]):
+            continue
+        if not in_ranges(code, ALLOWED_RANGES):
+            return True
+    return False
+
+
 def normalize(text):
-    """NFKC (styled and fullwidth letters become plain), hidden characters removed, lowercased, spaces collapsed."""
-    text = unicodedata.normalize("NFKC", text)
-    text = "".join(c for c in text if ord(c) in (0x09, 0x0A, 0x0D) or not (in_ranges(ord(c), HIDDEN_RANGES) or ord(c) == ZERO_WIDTH_JOINER))
-    return re.sub(r"[ \t]+", " ", text.casefold())
+    """NFKC (styled and fullwidth letters become plain), combining marks and hidden characters removed,
+    lowercased, spaces collapsed."""
+    text = unicodedata.normalize("NFD", unicodedata.normalize("NFKC", text))
+    text = "".join(c for c in text if ord(c) in (0x09, 0x0A, 0x0D) or not (
+        unicodedata.category(c) in ("Mn", "Me") or in_ranges(ord(c), HIDDEN_RANGES) or ord(c) == ZERO_WIDTH_JOINER))
+    text = unicodedata.normalize("NFC", text).replace("\u3002", ".").replace("\uff61", ".")
+    return re.sub(r"[ \t\u00a0\u2000-\u200a\u202f\u205f\u3000]+", " ", text.casefold())
+
+
+def tripwire(text):
+    """True when a token of the normalized text is a tripwire code."""
+    return any(hashlib.sha256(token.encode("utf-8")).hexdigest() in TRIPWIRES
+               for token in re.findall(r"[a-z0-9][a-z0-9\-]{5,40}", normalize(text)))
 
 
 def strip_code(text):
@@ -161,11 +210,15 @@ def rx(pattern, flags=0):
     return re.compile(pattern, flags)
 
 
-VERBS_OVERRIDE = r"ignore|disregard|forget|override|bypass|discard|abandon|neglect"
+VERBS_OVERRIDE = (r"ignore|disregard|forget|override|bypass|discard|abandon|neglect|set aside|put aside|pay no attention to|"
+                  r"supersede|disobey|stop following|no longer follow")
 NOUNS_OVERRIDE = (r"instructions?|prompts?|rules|directions|guidelines|guidance|context|constraints|polic(?:y|ies)|"
-                  r"programming|directives?|guardrails?|safeguards?|restrictions|system message")
+                  r"programming|directives?|guardrails?|safeguards?|restrictions|system message|briefing|the above|"
+                  r"everything above|what you were told|earlier text|task description")
 SECRET_NOUNS = (r"tokens?|secrets?|passwords?|passphrases?|api ?keys?|access keys?|private keys?|ssh keys?|credentials?|"
-                r"cookies?|env(?:ironment)? ?var(?:iable)?s?|\.env\b|github_token|source_repo_token|vpm_dispatch_token")
+                r"cookies?|env(?:ironment)? ?var(?:iable)?s?|\.env\b|github_token|source_repo_token|vpm_dispatch_token|"
+                r"signing keys?|deploy keys?|pats?\b|auth(?:entication)? (?:headers?|tokens?)|remote urls?|"
+                r"config(?:uration)? (?:values|file contents)")
 SECRET_VERBS = (r"reveal|print|show|output|send|post|share|leak|exfiltrate|echo|dump|list|expose|tell|give|paste|upload|"
                 r"display|return|include|write|copy|email|forward")
 TLDS = (r"com|net|org|io|dev|app|xyz|ru|cn|ly|gg|co|ai|info|biz|site|online|top|link|click|gl|tk|cc|uk|de|jp|fr|tv|ws|"
@@ -181,6 +234,7 @@ PATTERNS = {
         rx(r"\]\(\s*[^)\s]"),
         rx(r"(?m)^\s*\[[^\]\n]+\]:\s*\S"),
         rx(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
+        rx(r"\[[0-9a-f:]*::?[0-9a-f:]*\]|\b[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){7}\b|\b[0-9a-f]{1,4}::[0-9a-f]{1,4}\b"),
         rx(r"\b[\w.+\-]+@[a-z0-9\-]+(?:\.[a-z0-9\-]+)*\.[a-z]{2,}\b"),
         rx(r"\bhxxps?\b|\[\s*\.\s*\]|[\[(]\s*dot\s*[\])]|\s+dot\s+(?:com|net|org|io|dev|app|ru|cn)\b"),
     ],
@@ -192,7 +246,8 @@ PATTERNS = {
     "override": [
         rx(r"\b(?:%s)\b[^.\n]{0,40}\b(?:%s)\b" % (VERBS_OVERRIDE, NOUNS_OVERRIDE)),
         rx(r"\b(?:previous|prior|above|earlier|preceding|original|initial|all|old|real|actual|new|updated|hidden|secret)\s+"
-           r"(?:instructions|prompts?|directives|system prompt)\b"),
+           r"(?:instructions?|prompts|directives?|system prompt)\b"),
+        rx(r"\b(?:ignora|ignorez|ignoriere|ignorieren|ignoriruy|instrucciones|anweisungen|instruktsii|consignes|instrucoes|istruzioni)\b"),
         rx(r"\b(?:instructions|rules|guidelines)\s+(?:no longer apply|are (?:void|cancelled|canceled|obsolete|outdated|revoked))\b"),
     ],
     "roleplay": [
@@ -203,6 +258,9 @@ PATTERNS = {
            r"(?:ai|llm|claude|gpt|chatgpt|copilot|gemini|assistant|agent|bot|model|triage)\b"),
         rx(r"\bif you are an? (?:ai|llm|language model|assistant|agent|bot|model)\b|\bas an? (?:ai|llm|language model)\b"),
         rx(r"\b(?:claude|chatgpt|gpt-?\d\w*|copilot|gemini|llama|llm|anthropic|openai)\b"),
+        rx(r"\bwhoever (?:is )?(?:reads?|reading|summari[sz]es|summari[sz]ing|reviews?|reviewing|processes|triages)\b|"
+           r"\bautomated (?:reviewer|reader|assistant|agent|system|tool|triage)\b|\bthe reviewing (?:tool|system|agent)\b|"
+           r"\bsummari[sz]er\b|\bif you are (?:an? )?(?:automated|automatic)\b"),
     ],
     "delimiters": [
         rx(r"<\|[^|>\n]{1,40}\|>|\[/?inst\]|<</?sys>>"),
@@ -221,6 +279,24 @@ PATTERNS = {
         rx(r"\b(?:curl|wget|invoke-webrequest|iwr|netcat|ncat|nc -[a-z]|bash -c|sh -c|base64 -d|rm -rf|chmod \+x|eval\()"),
         rx(r"\b(?:please|you (?:must|should|need to|will|shall)|now|immediately)\s+"
            r"(?:merge|approve|commit|push|deploy|publish|release|delete|close|label|comment|reply|post|run|execute)\b"),
+        rx(r"\brecommend (?:merging|approving|closing|removing|adding|releasing)\b|"
+           r"\battach (?:the |this |another |a )?(?:repo|repository)\b|"
+           r"\b(?:include|copy|paste|quote|repeat|reproduce)\b[^.\n]{0,30}\b(?:verbatim|word for word|exactly as written|in full)\b|"
+           r"\bclarification (?:comment|draft|text)\b"),
+    ],
+    "authority": [
+        rx(r"\b(?:maintainers?|owner|admins?|administrator|riry|rionquosue|repository owner|the team)\b[^.\n]{0,40}"
+           r"\b(?:approved|authori[sz]ed|permits?|has allowed|signed off|pre-approved|whitelisted|allowlisted)\b"),
+        rx(r"\bpolicy (?:update|change)\b|\bupdated (?:repository |repo )?polic(?:y|ies)\b|"
+           r"\bper (?:the )?(?:new |updated )?(?:repository |repo |project )?polic(?:y|ies)\b"),
+    ],
+    "paths": [
+        rx(r"~/\.|/root\b|/etc/|\.git/config|\.gitconfig|\.ssh\b|\.config/|id_rsa|id_ed25519|\.npmrc|\.netrc|"
+           r"\.aws/|/proc/|\.claude\b|\.ccr\b|\.git-credentials"),
+    ],
+    "review": [
+        # Names of this check's own labels: ordinary reports have no reason to mention them.
+        rx(r"issue-check|security: ?(?:flagged|reviewed)|issue_check"),
     ],
 }
 
@@ -239,8 +315,17 @@ FORMAT_PATTERNS = {
 }
 # Math that uses code syntax, so it is matched before the code is stripped.
 MATH_CODE = rx(r"(?m)^[ \t]*(?:```|~~~)\s*math\b|\$`")
-DOMAIN = rx(r"\b(?:[a-z0-9](?:[a-z0-9\-]{0,61}[a-z0-9])?\.)+(?:%s)\b" % TLDS)
-UPPER_DOMAIN = rx(r"\b[A-Za-z0-9\-]+\.(?:COM|NET|ORG|DEV|APP|XYZ|RU|CN|INFO|SITE|ONLINE|TOP|LINK|CLICK)\b")
+DOMAIN = rx(r"\b(?:[a-z0-9](?:[a-z0-9\-]{0,61}[a-z0-9])?\.)+(%s)\b" % TLDS, re.IGNORECASE)
+UPPER_TLDS = {"com", "net", "org", "dev", "app", "xyz", "ru", "cn", "info", "site", "online", "top", "link", "click"}
+
+
+def has_domain(text):
+    """A domain with a listed TLD, ignoring all-caps endings like "System.IO" that read as code."""
+    for match in DOMAIN.finditer(text):
+        tld = match.group(1)
+        if not tld.isupper() or tld.lower() in UPPER_TLDS:
+            return True
+    return False
 BASE64 = rx(r"[A-Za-z0-9+/]{80,}={0,2}")
 HEX = rx(r"\b[0-9a-fA-F]{100,}\b")
 LATIN = rx(r"[A-Za-z]")
@@ -256,7 +341,7 @@ def scan(text):
     for name, patterns in PATTERNS.items():
         if any(p.search(plain) for p in patterns):
             found.add(name)
-    if DOMAIN.search(nfkc) or UPPER_DOMAIN.search(nfkc):
+    if has_domain(nfkc.replace("\u3002", ".").replace("\uff61", ".")):
         found.add("links")
     outside = strip_code(text)
     for name, patterns in FORMAT_PATTERNS.items():
@@ -270,6 +355,10 @@ def scan(text):
         found.add("hidden")
     if any(LATIN.search(word) and LOOKALIKE.search(word) for word in re.findall(r"\w+", text)):
         found.add("homoglyphs")
+    if unusual_characters(text):
+        found.add("characters")
+    if tripwire(text):
+        found.add("review")
     if BASE64.search(text) or HEX.search(text):
         found.add("encoded")
     if len(text) > MAX_LENGTH:
@@ -309,12 +398,14 @@ def issue_type(issue):
     return next((t for t in ISSUE_TYPES if t["label"] in names or title.startswith(t["prefix"])), None)
 
 
-def report(findings, missing, kind=None):
-    """The bot comment for these results, or None when everything passes."""
-    if not findings and not missing:
+def report(findings, missing, kind, fingerprint, strikes, held):
+    """The bot comment for these results, or None when everything passes and there is no state to keep."""
+    if not findings and not missing and not strikes and not held:
         return None
-    lines = [MARKER, "**Automated issue check**", ""]
-    if findings:
+    lines = [MARKER, "<!-- state strikes=%d held=%d -->" % (strikes, int(held)), "**Automated issue check**", ""]
+    if held:
+        lines += ["This issue is held for maintainer review. Edits will not clear it.", ""]
+    elif findings:
         lines += ["This issue is labelled `%s` and will not be reviewed until the text below is fixed. "
                   "Please edit it to plain text only: no links, images, HTML, special fonts, or instructions aimed at AI tools." % FLAGGED, ""]
         for where, names in findings:
@@ -325,7 +416,12 @@ def report(findings, missing, kind=None):
         needed = ", ".join(missing[:-1]) + " and " + missing[-1] if len(missing) > 1 else missing[0]
         lines += ["This %s needs %s before it can be reviewed. Details beyond that are not required. "
                   "Please edit the issue so it includes:" % (kind["name"], needed), "", "```markdown", kind["template"], "```", ""]
-    lines.append("This check runs again when the issue or a comment is edited.")
+    if not findings and not missing:
+        lines += ["All checks pass.", ""]
+    if findings:
+        lines.append("Owner: to clear this after reading the issue and every comment, comment `reviewed %s`. "
+                     "Any later change to the text needs a new review." % fingerprint)
+    lines.append("This check runs again when the issue or a comment changes.")
     return "\n".join(lines)
 
 
@@ -350,13 +446,14 @@ class GitHub:
             raise
 
     def comments(self, number):
+        """All comments, and whether that is all of them (False past MAX_COMMENTS)."""
         result = []
-        for page in range(1, 11):
+        for page in range(1, MAX_COMMENTS // 100 + 1):
             batch = self.call("GET", "/issues/%d/comments?per_page=100&page=%d" % (number, page))
             result += batch
             if len(batch) < 100:
-                break
-        return result
+                return result, True
+        return result, False
 
     def ensure_label(self, name):
         if self.call("GET", "/labels/" + urllib.parse.quote(name, safe=""), allow=(404,)) is None:
@@ -374,6 +471,54 @@ def is_bot(user):
     return (user or {}).get("type") == "Bot"
 
 
+def is_own_report(comment):
+    return (comment.get("user") or {}).get("login") == "github-actions[bot]" and MARKER in (comment.get("body") or "")
+
+
+def is_maintainer(item, owner):
+    """Owner, members and collaborators. Bots other than this check are treated as outsiders."""
+    return item.get("author_association") in MAINTAINERS or (item.get("user") or {}).get("login") == owner
+
+
+def issue_text(issue):
+    # The form's "[Feature]: " or "[Bug]: " title prefix reads like a Markdown link reference.
+    title = re.sub(r"^\s*\[(?:feature|bug)\]:\s*", "", issue.get("title") or "", flags=re.IGNORECASE)
+    return title + "\n" + (issue.get("body") or "")
+
+
+def content_fingerprint(issue, outsider_comments):
+    """First 12 hex digits of a SHA-256 over the title, body and every outsider comment."""
+    digest = hashlib.sha256()
+    for part in [issue.get("title") or "", issue.get("body") or ""] + [
+            "%s\0%s" % (c["id"], c.get("body") or "") for c in outsider_comments]:
+        digest.update(part.encode("utf-8") + b"\0\0")
+    return digest.hexdigest()[:12]
+
+
+def check_texts(issue, outsider_comments, complete, owner):
+    """Findings for an issue: (where, check names) pairs, including the conversation read as one text."""
+    findings = []
+    texts = []
+    if not is_maintainer(issue, owner):
+        texts.append(issue_text(issue))
+        names = scan(texts[-1])
+        if names:
+            findings.append(("The issue", names))
+    for comment in outsider_comments:
+        texts.append(comment.get("body") or "")
+        names = scan(texts[-1])
+        if names:
+            findings.append(("Comment from %s (%s)" % (comment["user"]["login"], comment["html_url"]), names))
+    # Text split across lines or comments is read together by the triage agent.
+    seen = {name for _, names in findings for name in names}
+    joined = [n for n in scan(" ".join(re.sub(r"\s+", " ", t) for t in texts)) if n not in seen and n != "length"]
+    if joined:
+        findings.append(("The conversation as a whole", joined))
+    if not complete:
+        findings.append(("The comments", ["volume"]))
+    return findings
+
+
 def main():
     with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as handle:
         event = json.load(handle)
@@ -385,54 +530,52 @@ def main():
     sender = event.get("sender") or {}
     action = event.get("action")
 
+    # Fail closed before anything else: triage reads nothing unless this run finishes and passes.
+    github.call("DELETE", "/issues/%d/labels/%s" % (number, urllib.parse.quote(PASSED, safe="")), allow=(404,))
     issue = github.call("GET", "/issues/%d" % number)
-    if issue.get("state") != "open":
-        return
-    labels = {label["name"] for label in issue.get("labels", [])}
-    # Fail closed: the issue stays unread by triage unless this run finishes and everything passes.
-    github.set_label(number, labels, PASSED, False)
-    labels.discard(PASSED)
-    comments = github.comments(number)
+    labels = {label["name"] for label in issue.get("labels", [])} - {PASSED}
+    comments, complete = github.comments(number)
+    own = next((c for c in comments if is_own_report(c)), None)
+    outsiders = [c for c in comments if not is_own_report(c) and not is_maintainer(c, owner)]
+    fingerprint = content_fingerprint(issue, outsiders)
+    state = re.search(r"<!-- state strikes=(\d+) held=([01]) -->", (own or {}).get("body") or "")
+    strikes, held = (int(state.group(1)), state.group(2) == "1") if state else (0, False)
 
-    # A text change by anyone but the owner voids an earlier review.
-    if sender.get("login") != owner and not is_bot(sender) and action in ("opened", "edited", "created", "reopened"):
-        github.set_label(number, labels, REVIEWED, False)
-        labels.discard(REVIEWED)
-
-    findings = []
-    if REVIEWED not in labels:
-        if issue.get("author_association") not in MAINTAINERS and issue["user"]["login"] != owner:
-            # The form's "[Feature]: " or "[Bug]: " title prefix reads like a Markdown link reference.
-            title = re.sub(r"^\s*\[(?:feature|bug)\]:\s*", "", issue.get("title") or "", flags=re.IGNORECASE)
-            names = scan(title + "\n" + (issue.get("body") or ""))
-            if names:
-                findings.append(("The issue", names))
-        for comment in comments:
-            if is_bot(comment.get("user")) or comment.get("author_association") in MAINTAINERS or comment["user"]["login"] == owner:
-                continue
-            names = scan(comment.get("body"))
-            if names:
-                findings.append(("Comment from %s (%s)" % (comment["user"]["login"], comment["html_url"]), names))
+    findings = check_texts(issue, outsiders, complete, owner)
+    # The owner's review covers exactly the text it names; any change gives a new fingerprint.
+    reviewed = any((c.get("user") or {}).get("login") == owner and
+                   re.search(r"\breviewed\s+%s\b" % fingerprint, c.get("body") or "") for c in comments)
+    if reviewed:
+        findings, strikes, held = [], 0, False
+    else:
+        if findings and sender.get("login") != owner and action in ("opened", "edited", "created", "reopened"):
+            strikes += 1
+        if any("review" in names for _, names in findings) or strikes >= HOLD_AFTER:
+            held = True
+        if held:
+            findings = findings or [("The issue", ["review"])]
+            if owner not in [a["login"] for a in issue.get("assignees") or []]:
+                github.call("POST", "/issues/%d/assignees" % number, {"assignees": [owner]}, allow=(422,))
 
     kind = issue_type(issue)
     missing = missing_sections(issue.get("body"), kind["required"]) if kind else []
 
     github.set_label(number, labels, FLAGGED, bool(findings))
+    github.set_label(number, labels, REVIEWED, reviewed)
     github.set_label(number, labels, CLARIFY, bool(missing))
 
-    body = report(findings, missing, kind)
-    existing = next((c for c in comments if is_bot(c.get("user")) and MARKER in (c.get("body") or "")), None)
-    if body and existing and existing["body"] != body:
-        github.call("PATCH", "/issues/comments/%d" % existing["id"], {"body": body})
-    elif body and not existing:
+    body = report(findings, missing, kind, fingerprint, strikes, held)
+    if body and own and own["body"] != body:
+        github.call("PATCH", "/issues/comments/%d" % own["id"], {"body": body})
+    elif body and not own:
         github.call("POST", "/issues/%d/comments" % number, {"body": body})
-    elif not body and existing:
-        github.call("DELETE", "/issues/comments/%d" % existing["id"], allow=(404,))
+    elif not body and own:
+        github.call("DELETE", "/issues/comments/%d" % own["id"], allow=(404,))
     # Last, so the issue is only marked as passed once its report is up to date.
     github.set_label(number, labels, PASSED, not findings and not missing)
 
-    summary = ", ".join("%s: %s" % (where.split(" (")[0], ", ".join(names)) for where, names in findings) or "no security findings"
-    print("Issue #%d: %s; missing sections: %s." % (number, summary, ", ".join(missing) or "none"))
+    # Workflow logs are public: give the outcome only.
+    print("Issue #%d: %s." % (number, "flagged" if findings else "needs clarification" if missing else "passed"))
 
 
 if __name__ == "__main__":
