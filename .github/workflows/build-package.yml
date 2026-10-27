@@ -104,7 +104,7 @@ jobs:
           fi
           gh release create "$tag" "${{ steps.build.outputs.zip }}" dist/package.json --target main \
             --title "${{ steps.build.outputs.name }} ${{ steps.build.outputs.version }}" \
-            --notes "Built from ${{ env.SOURCE_REPOSITORY }}@$(git -C source rev-parse --short HEAD)."
+            --notes "Built from ${{ env.SOURCE_REPOSITORY }}@$(git -C source rev-parse HEAD)."
           gh api "repos/${{ github.repository }}/releases/tags/$tag" | python3 scripts/verify_release.py --zip "${{ steps.build.outputs.zip }}"
 
       # Releases made with the workflow token do not start other workflows, so start the listing build here.

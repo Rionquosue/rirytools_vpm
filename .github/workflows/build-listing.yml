@@ -58,10 +58,21 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
+      # Full history, to confirm each new version's source commit is on main and rebuild it.
+      - name: Check out the source repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: Rionquosue/riryunityworkflow
+          ref: main
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+          lfs: true
+
       - name: Verify the listing
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 -I scripts/verify_listing.py ${{env.listPublishDirectory}}/index.json
+        run: python3 -I scripts/verify_listing.py ${{env.listPublishDirectory}}/index.json --source source
 
       - name: Setup Pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
