@@ -14,10 +14,14 @@ Labels:
                        Set by this check; any change to the text gives a new fingerprint.
   needs clarification  A feature request or bug report is missing required sections.
 
-Text may contain only plain characters (ASCII, Latin-1, Latin Extended-A, common
-punctuation, arrows, box drawing and emoji); anything else is flagged. The owner is
-assigned to every flagged issue. After %d flagged edits by the same person, or
-when a tripwire code is found, the flag is held until the owner reviews it.
+Formatting, links, characters and language checks trip on their own. Wording aimed at
+an AI reader is scored instead: each WORDING pattern has a weight, and a text's score
+combines the weights of the patterns it matches. A score of REVIEW_SCORE flags the text;
+BLOCK_SCORE removes an outsider's comment, or closes and locks an outsider's issue, and
+holds the issue. Text must be English in plain characters (ASCII, common symbols,
+punctuation, arrows, box drawing and emoji). The owner is assigned to every flagged
+issue. After %d flagged edits by the same person, or when a tripwire code is found,
+the flag is held until the owner reviews it.
 """ % 3
 import hashlib
 import html
@@ -46,6 +50,9 @@ MAX_COMMENTS = 1000
 HOLD_AFTER = 3
 MAX_JOINED = 200000
 TIME_BUDGET = 300
+# Wording scores (0 to 1) at which text is flagged, and at which it is removed and the issue held.
+REVIEW_SCORE = 0.45
+BLOCK_SCORE = 0.8
 # Checks that do not apply to maintainers' own text (their links, paths and formatting are trusted);
 # everything aimed at an AI reader still does, since a maintainer may relay outsider text.
 MAINTAINER_EXEMPT = {"links", "lookup", "paths", "html", "math", "encoded", "length"}
@@ -67,7 +74,8 @@ CHECKS = {
     "fonts": "Styled Unicode letters (bold, italic, fullwidth, circled, small caps) instead of plain text",
     "hidden": "Invisible, private-use or text-direction characters",
     "homoglyphs": "Words mixing Latin letters with look-alike Cyrillic or Greek letters",
-    "characters": "Characters outside plain text (other scripts, look-alike letters, combining marks, unusual spaces or symbols)",
+    "characters": "Characters outside plain English text (accented letters, other scripts, look-alike letters, combining marks, unusual spaces or symbols)",
+    "language": "Text that is not in English",
     "authority": "Claims of maintainer approval or of a policy change",
     "paths": "Local configuration or credential paths (.git/config, .ssh, home folder dotfiles, /etc, /root)",
     "review": "Text that needs maintainer review",
@@ -144,8 +152,8 @@ STYLED_RANGES = [
 ZERO_WIDTH_JOINER = 0x200D
 ALLOWED_RANGES = [
     (0x0009, 0x000A), (0x000D, 0x000D), (0x0020, 0x007E),
-    (0x00A0, 0x00AC), (0x00AE, 0x00FF),          # Latin-1 without the soft hyphen
-    (0x0100, 0x0130), (0x0132, 0x017E),          # Latin Extended-A without dotless i and long s
+    (0x00A0, 0x00AC), (0x00AE, 0x00BF),          # Latin-1 symbols without the soft hyphen
+    (0x00D7, 0x00D7), (0x00F7, 0x00F7),          # multiplication and division signs
     (0x2010, 0x2015), (0x2018, 0x201F), (0x2022, 0x2022), (0x2026, 0x2026), (0x2030, 0x2030),
     (0x2032, 0x2033), (0x20AC, 0x20AC), (0x2122, 0x2122), (0x2190, 0x21FF), (0x2212, 0x2212),
     (0x2264, 0x2265), (0x2500, 0x257F),          # punctuation, euro, trademark, arrows, math, box drawing
@@ -237,7 +245,7 @@ TLDS = (r"com|net|org|io|dev|app|xyz|ru|cn|ly|gg|co|ai|info|biz|site|online|top|
         r"page|live|store|cloud|tech|pw|su|ml|ga|cf|gq|ir|kr|br|ca|eu|nl|au|ch|es|pl|se|fi|dk|cz|mobi|pro|edu|gov|mil|"
         r"lol|wtf|club|fun|space|website|blog|news|chat|bot|codes|zone|work|world|today|email|host|digital|network")
 
-# Patterns matched against normalize(text) unless noted.
+# Patterns matched against normalize(text) unless noted. Any match fails the check.
 PATTERNS = {
     "links": [
         rx(r"\b[a-z][a-z0-9+.\-]{1,15}://"),
@@ -250,30 +258,6 @@ PATTERNS = {
         rx(r"[\w.+\-]{1,64}@[a-z0-9\-]{1,63}(?:\.[a-z0-9\-]{1,63}){0,8}\.[a-z]{2,24}\b"),
         rx(r"\bhxxps?\b|\[\s*\.\s*\]|[\[(][ \t]{0,3}dot[ \t]{0,3}[\])]|[ \t]{1,5}dot[ \t]{1,5}(?:com|net|org|io|dev|app|ru|cn)\b"),
     ],
-    "lookup": [
-        rx(r"\b(?:visit|browse|go to|navigate to|look up|lookup|check out|fetch|download|search|google|follow|click|open)\b"
-           r"[^.\n]{0,30}\b(?:websites?|web ?sites?|web ?pages?|urls?|links?|domains?|the web|internet|online|gists?|pastebin)\b"),
-        rx(r"\b(?:search|look) (?:it |this |that )?(?:up )?(?:online|on the web|on the internet|on google)\b"),
-    ],
-    "override": [
-        rx(r"\b(?:%s)\b[^.\n]{0,40}\b(?:%s)\b" % (VERBS_OVERRIDE, NOUNS_OVERRIDE)),
-        rx(r"\b(?:previous|prior|above|earlier|preceding|original|initial|all|old|real|actual|new|updated|hidden|secret)\s+"
-           r"(?:instructions?|prompts|directives?|system prompt)\b"),
-        rx(r"\b(?:ignora|ignorez|ignoriere|ignorieren|ignoriruy|instrucciones|anweisungen|instruktsii|consignes|instrucoes|istruzioni)\b"),
-        rx(r"\b(?:instructions|rules|guidelines)\s+(?:no longer apply|are (?:void|cancelled|canceled|obsolete|outdated|revoked))\b"),
-    ],
-    "roleplay": [
-        rx(r"\byou are (?:now|no longer|actually|an? (?:ai|assistant|agent|language model|llm|bot|model))\b"),
-        rx(r"\b(?:act|behave|respond|reply|answer|roleplay) as (?:if|an?|the)\b|\bpretend (?:to be|you|that)\b"),
-        rx(r"\bfrom now on\b|\bdeveloper mode\b|\bjailbr[eo]a?k|\bdo anything now\b|\bdan mode\b|\bsystem prompt\b"),
-        rx(r"\b(?:dear|hey|hello|hi|attention|note to|message to|instructions? (?:for|to))\s+(?:the\s+)?"
-           r"(?:ai|llm|claude|gpt|chatgpt|copilot|gemini|assistant|agent|bot|model|triage)\b"),
-        rx(r"\bif you are an? (?:ai|llm|language model|assistant|agent|bot|model)\b|\bas an? (?:ai|llm|language model)\b"),
-        rx(r"\b(?:claude|chatgpt|gpt-?\d\w*|copilot|gemini|llama|llm|anthropic|openai)\b"),
-        rx(r"\bwhoever (?:is )?(?:reads?|reading|summari[sz]es|summari[sz]ing|reviews?|reviewing|processes|triages)\b|"
-           r"\bautomated (?:reviewer|reader|assistant|agent|system|tool|triage)\b|\bthe reviewing (?:tool|system|agent)\b|"
-           r"\bsummari[sz]er\b|\bif you are (?:an? )?(?:automated|automatic)\b"),
-    ],
     "delimiters": [
         rx(r"<\|[^|>\n]{1,40}\|>|\[/?inst\]|<</?sys>>"),
         rx(r"</?\s*(?:system|assistant|user|human|instructions?|prompt|context|tool_?(?:call|result|use)s?|"
@@ -282,33 +266,65 @@ PATTERNS = {
         rx(r"\b(?:begin|end|start)\s+(?:of\s+)?(?:the\s+)?(?:system|prompt|instructions?)\b"),
         rx(r"(?m)^[ \t]*#{1,6}[ \t]*(?:system|instructions?|response|assistant)\b"),
     ],
-    "secrets": [
-        rx(r"\b(?:%s)\b[^.\n]{0,60}\b(?:%s)" % (SECRET_VERBS, SECRET_NOUNS)),
-        rx(r"\b(?:%s)[^.\n]{0,40}\b(?:to|into|in) (?:a |the |this |your )?(?:comment|issue|reply|response|output|log)\b" % SECRET_NOUNS),
-    ],
-    "commands": [
-        rx(r"\b(?:run|execute|eval|exec)\b[^.\n]{0,30}\b(?:commands?|shell|bash|powershell|terminal|cmd|sh)\b"),
-        rx(r"\b(?:curl|wget|invoke-webrequest|iwr|netcat|ncat|nc -[a-z]|bash -c|sh -c|base64 -d|rm -rf|chmod \+x|eval\()"),
-        rx(r"\b(?:please|you (?:must|should|need to|will|shall)|now|immediately)\s+"
-           r"(?:merge|approve|commit|push|deploy|publish|release|delete|close|label|comment|reply|post|run|execute)\b"),
-        rx(r"\brecommend (?:merging|approving|closing|removing|adding|releasing)\b|"
-           r"\battach (?:the |this |another |a )?(?:repo|repository)\b|"
-           r"\b(?:include|copy|paste|quote|repeat|reproduce)\b[^.\n]{0,30}\b(?:verbatim|word for word|exactly as written|in full)\b|"
-           r"\bclarification (?:comment|draft|text)\b"),
-    ],
-    "authority": [
-        rx(r"\b(?:maintainers?|owner|admins?|administrator|riry|rionquosue|repository owner|the team)\b[^.\n]{0,40}"
-           r"\b(?:approved|authori[sz]ed|permits?|has allowed|signed off|pre-approved|whitelisted|allowlisted)\b"),
-        rx(r"\bpolicy (?:update|change)\b|\bupdated (?:repository |repo )?polic(?:y|ies)\b|"
-           r"\bper (?:the )?(?:new |updated )?(?:repository |repo |project )?polic(?:y|ies)\b"),
-    ],
-    "paths": [
-        rx(r"~/\.|/root\b|/etc/|\.git/config|\.gitconfig|\.ssh\b|\.config/|id_rsa|id_ed25519|\.npmrc|\.netrc|"
-           r"\.aws/|/proc/|\.claude\b|\.ccr\b|\.git-credentials"),
-    ],
     "review": [
         # Names of this check's own labels: ordinary reports have no reason to mention them.
         rx(r"issue-check|security: ?(?:flagged|reviewed)|issue_check"),
+    ],
+}
+
+# Wording patterns, matched like PATTERNS, as (weight, pattern). A weight is how strongly a match
+# alone reads as prompt injection: REVIEW_SCORE or more flags the text by itself, and weaker
+# matches flag it only together. Weights combine as 1 - (1 - w1)(1 - w2)..., so 0.65 and 0.5
+# give 0.825 (removed), and 0.3 and 0.25 give 0.475 (flagged). Each pattern counts once per text, however often it matches.
+WORDING = {
+    "lookup": [
+        (0.3, rx(r"\b(?:visit|browse|go to|navigate to|look up|lookup|check out|fetch|download|search|google|follow|click|open)\b"
+                 r"[^.\n]{0,30}\b(?:websites?|web ?sites?|web ?pages?|urls?|links?|domains?|the web|internet|online|gists?|pastebin)\b")),
+        (0.2, rx(r"\b(?:search|look) (?:it |this |that )?(?:up )?(?:online|on the web|on the internet|on google)\b")),
+    ],
+    "override": [
+        (0.65, rx(r"\b(?:%s)\b[^.\n]{0,40}\b(?:%s)\b" % (VERBS_OVERRIDE, NOUNS_OVERRIDE))),
+        (0.5, rx(r"\b(?:previous|prior|above|earlier|preceding|original|initial|all|old|real|actual|new|updated|hidden|secret)\s+"
+                 r"(?:instructions?|prompts|directives?|system prompt)\b")),
+        (0.5, rx(r"\b(?:ignora|ignorez|ignoriere|ignorieren|ignoriruy|instrucciones|anweisungen|instruktsii|consignes|instrucoes|istruzioni)\b")),
+        (0.8, rx(r"\b(?:instructions|rules|guidelines)\s+(?:no longer apply|are (?:void|cancelled|canceled|obsolete|outdated|revoked))\b")),
+    ],
+    "roleplay": [
+        (0.45, rx(r"\byou are (?:now|no longer|actually|an? (?:ai|assistant|agent|language model|llm|bot|model))\b")),
+        (0.25, rx(r"\b(?:act|behave|respond|reply|answer|roleplay) as (?:if|an?|the)\b|\bpretend (?:to be|you|that)\b")),
+        (0.15, rx(r"\bfrom now on\b|\bdeveloper mode\b")),
+        (0.6, rx(r"\bjailbr[eo]a?k|\bdo anything now\b|\bdan mode\b|\bsystem prompt\b")),
+        (0.5, rx(r"\b(?:dear|hey|hello|hi|attention|note to|message to|instructions? (?:for|to))\s+(?:the\s+)?"
+                 r"(?:ai|llm|claude|gpt|chatgpt|copilot|gemini|assistant|agent|bot|model|triage)\b")),
+        (0.6, rx(r"\bif you are an? (?:ai|llm|language model|assistant|agent|bot|model)\b|\bas an? (?:ai|llm|language model)\b")),
+        (0.15, rx(r"\b(?:claude|chatgpt|gpt-?\d\w*|copilot|gemini|llama|llm|anthropic|openai)\b")),
+        (0.45, rx(r"\bwhoever (?:is )?(?:reads?|reading|summari[sz]es|summari[sz]ing|reviews?|reviewing|processes|triages)\b|"
+                 r"\bautomated (?:reviewer|reader|assistant|agent|system|tool|triage)\b|\bthe reviewing (?:tool|system|agent)\b|"
+                 r"\bsummari[sz]er\b|\bif you are (?:an? )?(?:automated|automatic)\b")),
+    ],
+    "secrets": [
+        (0.5, rx(r"\b(?:%s)\b[^.\n]{0,60}\b(?:%s)" % (SECRET_VERBS, SECRET_NOUNS))),
+        (0.5, rx(r"\b(?:%s)[^.\n]{0,40}\b(?:to|into|in) (?:a |the |this |your )?(?:comment|issue|reply|response|output|log)\b" % SECRET_NOUNS)),
+    ],
+    "commands": [
+        (0.2, rx(r"\b(?:run|execute|eval|exec)\b[^.\n]{0,30}\b(?:commands?|shell|bash|powershell|terminal|cmd|sh)\b")),
+        (0.45, rx(r"\b(?:curl|wget|invoke-webrequest|iwr|netcat|ncat|nc -[a-z]|bash -c|sh -c|base64 -d|rm -rf|chmod \+x|eval\()")),
+        (0.25, rx(r"\b(?:please|you (?:must|should|need to|will|shall)|now|immediately)\s+"
+                 r"(?:merge|approve|commit|push|deploy|publish|release|delete|close|label|comment|reply|post|run|execute)\b")),
+        (0.45, rx(r"\brecommend (?:merging|approving|closing|removing|adding|releasing)\b|"
+                 r"\battach (?:the |this |another |a )?(?:repo|repository)\b|"
+                 r"\b(?:include|copy|paste|quote|repeat|reproduce)\b[^.\n]{0,30}\b(?:verbatim|word for word|exactly as written|in full)\b|"
+                 r"\bclarification (?:comment|draft|text)\b")),
+    ],
+    "authority": [
+        (0.5, rx(r"\b(?:maintainers?|owner|admins?|administrator|riry|rionquosue|repository owner|the team)\b[^.\n]{0,40}"
+                 r"\b(?:approved|authori[sz]ed|permits?|has allowed|signed off|pre-approved|whitelisted|allowlisted)\b")),
+        (0.45, rx(r"\bpolicy (?:update|change)\b|\bupdated (?:repository |repo )?polic(?:y|ies)\b|"
+                 r"\bper (?:the )?(?:new |updated )?(?:repository |repo |project )?polic(?:y|ies)\b")),
+    ],
+    "paths": [
+        (0.5, rx(r"~/\.|/root\b|/etc/|\.git/config|\.gitconfig|\.ssh\b|\.config/|id_rsa|id_ed25519|\.npmrc|\.netrc|"
+                 r"\.aws/|/proc/|\.claude\b|\.ccr\b|\.git-credentials")),
     ],
 }
 
@@ -350,11 +366,53 @@ LOOKALIKE = rx(r"[\u0370-\u03FF\u0400-\u04FF]")
 
 
 QUOTE_PREFIX = rx(r"(?m)^[ \t]*(?:(?:>|[-*+]|\d{1,3}[.)])[ \t]*)+")
+# Common words of other languages that English text does not use, for text written without accents
+# (accented letters already fail "characters"). Words that are also English, code or file names
+# ("die", "per", "com", "ini", "mit", "jest", "todo") are left out.
+FOREIGN_WORDS = set("""
+los las una unos unas que por para pero muy esta este esto estos como cuando donde porque gracias hola tiene puede
+hacer quiero necesito tambien nada les des une avec dans vous nous mais sur sont cette merci bonjour aussi tres peut
+faire avoir und der das nicht ist ich auf ein eine wenn aber oder auch wird sind kann bitte danke haben werden uma
+isso voce obrigado entao muito pra nao esse essa sono della questo questa anche perche grazie ciao che het een niet
+zijn ook maar voor bedankt yang tidak itu dengan untuk saya bisa kasih ang mga naman salamat nie sie jak bir icin cok
+desu arigatou kudasai onegai watashi privet spasibo pozhaluysta
+""".split())
+ENGLISH_WORDS = set("the an and or of to in on at is are was were be it this that for with not you my we have has but "
+                    "if when what so do can will from as by".split())
+
+
+def foreign(text):
+    """True when the text outside code reads as another language: at least two different
+    FOREIGN_WORDS, and more of them than common English words."""
+    words = re.findall(r"[a-z]+", normalize(strip_code(text)))
+    hits = [word for word in words if word in FOREIGN_WORDS]
+    return len(set(hits)) >= 2 and len(hits) > sum(word in ENGLISH_WORDS for word in words)
+
+
+def score(hits):
+    """How strongly a set of (check, index) WORDING hits reads as prompt injection, from 0 to 1."""
+    unlikely = 1.0
+    for name, index in hits:
+        unlikely *= 1 - WORDING[name][index][0]
+    return 1 - unlikely
+
+
+def names(found, hits):
+    """CHECKS names, in CHECKS order: every check in found, and the wording checks with hits when
+    their combined score reaches REVIEW_SCORE."""
+    if score(hits) >= REVIEW_SCORE:
+        found = found | {name for name, _ in hits}
+    return [name for name in CHECKS if name in found]
 
 
 def scan(text):
-    """Names of the CHECKS that text fails, in CHECKS order. Line-start checks also see each line
-    with quote and list markers ("> ", "- ", "1. ") removed."""
+    """Names of the CHECKS that text fails, in CHECKS order."""
+    return names(*assess(text))
+
+
+def assess(text):
+    """The CHECKS that text fails outright, and the (check, index) of every WORDING pattern it
+    matches. Line-start checks also see each line with quote and list markers ("> ", "- ", "1. ") removed."""
     text = text or ""
     found = set()
     unquoted = QUOTE_PREFIX.sub("", text)
@@ -365,6 +423,8 @@ def scan(text):
     for name, patterns in PATTERNS.items():
         if any(p.search(plain) for p in patterns):
             found.add(name)
+    hits = {(name, index) for name, patterns in WORDING.items()
+            for index, (_, pattern) in enumerate(patterns) if pattern.search(plain)}
     if has_domain(nfkc.replace("\u3002", ".").replace("\uff61", ".")):
         found.add("links")
     outside = strip_code(text) + "\n" + strip_code(unquoted)
@@ -381,13 +441,15 @@ def scan(text):
         found.add("homoglyphs")
     if unusual_characters(text):
         found.add("characters")
+    if foreign(text):
+        found.add("language")
     if tripwire(text):
         found.add("review")
     if BASE64.search(text) or HEX.search(text):
         found.add("encoded")
     if len(text) > MAX_LENGTH:
         found.add("length")
-    return [name for name in CHECKS if name in found]
+    return found, hits
 
 
 def sections(body):
@@ -422,19 +484,21 @@ def issue_type(issue):
     return next((t for t in ISSUE_TYPES if t["label"] in names or title.startswith(t["prefix"])), None)
 
 
-def report(findings, missing, kind, fingerprint, strikes, held, reviewed=False):
+def report(findings, missing, kind, fingerprint, strikes, held, reviewed=False, removed=0):
     """The bot comment for these results, or None when everything passes and there is no state to keep."""
-    if not findings and not missing and not strikes and not held:
+    if not findings and not missing and not strikes and not held and not removed:
         return None
     state = ",".join("%s:%d" % item for item in sorted(strikes.items()))
-    lines = [MARKER, "<!-- state strikes=%s held=%d -->" % (state, int(held)), "**Automated issue check**", ""]
+    lines = [MARKER, "<!-- state strikes=%s held=%d removed=%d -->" % (state, int(held), removed), "**Automated issue check**", ""]
+    if removed:
+        lines += ["%d comment%s that read as prompt injection %s removed." % (removed, "s" * (removed > 1), "were" if removed > 1 else "was"), ""]
     if reviewed:
         lines += ["The owner reviewed the current text. Any change to it needs a new review.", ""]
     elif held:
         lines += ["This issue is held for maintainer review. Edits will not clear it.", ""]
     elif findings:
         lines += ["This issue is labelled `%s` and will not be reviewed until the text below is fixed. "
-                  "Please edit it to plain text only: no links, images, HTML, special fonts, or instructions aimed at AI tools." % FLAGGED, ""]
+                  "Please edit it to plain English text only: no links, images, HTML, special fonts, accented letters, or instructions aimed at AI tools." % FLAGGED, ""]
         for where, names, _ in findings:
             lines.append("- %s:" % where)
             lines += ["  - %s" % CHECKS[name] for name in names]
@@ -543,39 +607,68 @@ def login_of(item):
     return (item.get("user") or {}).get("login") or "a deleted user"
 
 
-def check_texts(issue, comments, complete):
-    """Findings for an issue as (where, check names, author login) tuples. Every readable text is
-    scanned; maintainers' text skips MAINTAINER_EXEMPT. The conversation is also scanned as one
-    text, and an over-long conversation or a run past TIME_BUDGET fails closed."""
-    findings = []
-    texts = []
+def review_texts(issue, comments, complete):
+    """Findings for an issue as (where, check names, author login) tuples, the outsider texts (the
+    issue or comments) that scored BLOCK_SCORE, and whether the issue must be held.
+
+    Every readable text is scanned; maintainers' text skips MAINTAINER_EXEMPT. One outsider's
+    wording is also scored across all their texts, so splitting it over several comments does not
+    lower it. The conversation read as one text is checked too, counting only wording that appears
+    where texts meet, so ordinary words in different people's comments do not add up. An
+    over-long conversation or a run past TIME_BUDGET fails closed."""
+    findings, blocked, hold = [], [], False
+    texts, seen, people = [], set(), {}
     started = time.monotonic()
     items = [("The issue", issue_text(issue), issue)] + [
         ("Comment from %s (%s)" % (login_of(c), c.get("html_url")), c.get("body") or "", c) for c in readable_comments(comments)]
     for where, text, item in items:
         if time.monotonic() - started > TIME_BUDGET:
             findings.append(("The conversation", ["volume"], None))
-            return findings
+            return findings, blocked, hold
         # Over-long text is flagged without scanning, which keeps every run short.
-        names = ["length"] if len(text) > MAX_LENGTH else scan(text)
+        found, hits = ({"length"}, set()) if len(text) > MAX_LENGTH else assess(text)
         if is_maintainer(item):
-            names = [n for n in names if n not in MAINTAINER_EXEMPT]
+            found -= MAINTAINER_EXEMPT
+            hits = {hit for hit in hits if hit[0] not in MAINTAINER_EXEMPT}
+        else:
+            if score(hits) >= BLOCK_SCORE:
+                blocked.append(item)
+            # Deleted accounts all show as "ghost" (or no user), so each of their texts stands alone.
+            user = item.get("user") or {}
+            key = user.get("id") if user.get("login") not in (None, "ghost") else ("deleted", id(item))
+            person = people.setdefault(key, {"login": login_of(item), "hits": set(), "flagged": False})
+            person["hits"] |= hits
+            person["flagged"] |= score(hits) >= REVIEW_SCORE
         texts.append(text[:MAX_LENGTH])
-        if names:
-            findings.append((where, names, login_of(item)))
+        seen |= hits
+        flagged = names(found, hits)
+        if flagged:
+            findings.append((where, flagged, login_of(item)))
+    for person in people.values():
+        if score(person["hits"]) >= BLOCK_SCORE:
+            hold = True
+        if not person["flagged"] and score(person["hits"]) >= REVIEW_SCORE:
+            findings.append(("Comments from %s, read together" % person["login"], names(set(), person["hits"]), person["login"]))
     # Text split across lines or comments is read together by the triage agent.
     joined = " ".join(re.sub(r"\s+", " ", t) for t in texts if t)
     if len(joined) > MAX_JOINED:
         findings.append(("The conversation as a whole", ["volume"], None))
     else:
-        whole = [n for n in scan(joined) if n not in MAINTAINER_EXEMPT]
-        if "review" not in whole and tripwire(joined):
-            whole.append("review")
+        found, hits = assess(joined)
+        hits = {hit for hit in hits if hit[0] not in MAINTAINER_EXEMPT} - seen
+        if score(hits) >= BLOCK_SCORE:
+            hold = True
+        whole = names(found - MAINTAINER_EXEMPT, hits)
         if whole:
             findings.append(("The conversation as a whole", whole, None))
     if not complete:
         findings.append(("The comments", ["volume"], None))
-    return findings
+    return findings, blocked, hold
+
+
+def check_texts(issue, comments, complete):
+    """Findings for an issue as (where, check names, author login) tuples; see review_texts."""
+    return review_texts(issue, comments, complete)[0]
 
 
 def main():
@@ -596,7 +689,7 @@ def main():
     comments, complete = github.comments(number)
     own = next((c for c in comments if is_own_report(c)), None)
     fingerprint = content_fingerprint(issue, comments)
-    state = re.search(r"<!-- state strikes=([\w\-\[\]:,]*) held=([01]) -->", (own or {}).get("body") or "")
+    state = re.search(r"<!-- state strikes=([\w\-\[\]:,]*) held=([01])(?: removed=(\d+))? -->", (own or {}).get("body") or "")
     strikes = {}
     if state:
         for entry in filter(None, state.group(1).split(",")):
@@ -604,11 +697,12 @@ def main():
             if who and count.isdigit():
                 strikes[who] = int(count)
     held = bool(state) and state.group(2) == "1"
+    removed = int(state.group(3) or 0) if state else 0
 
     # The owner's latest review covers exactly the text it names; any change gives a new fingerprint.
     # It is checked first, so the owner can always clear an issue, however slow it is to scan.
     reviewed = latest_review(comments) == fingerprint
-    findings = [] if reviewed else check_texts(issue, comments, complete)
+    findings, blocked, hold = ([], [], False) if reviewed else review_texts(issue, comments, complete)
     if not reviewed:
         authors = {author for _, _, author in findings}
         login = sender.get("login") or ""
@@ -616,8 +710,25 @@ def main():
         if (findings and login != owner and action in ("opened", "edited", "created", "reopened")
                 and (login in authors or None in authors)):
             strikes[login] = strikes.get(login, 0) + 1
-        if any("review" in names for _, names, _ in findings) or any(n >= HOLD_AFTER for n in strikes.values()):
+        if (hold or blocked or any("review" in checks for _, checks, _ in findings)
+                or any(n >= HOLD_AFTER for n in strikes.values())):
             held = True
+        # Outsider text that scored BLOCK_SCORE is taken down: a comment is deleted, and an issue is
+        # closed and locked (only admins can delete issues). Changes made with the workflow token start
+        # no new run, so this run goes on to check what is left.
+        for item in blocked:
+            if item is issue:
+                if issue.get("state") != "closed":
+                    github.call("PATCH", "/issues/%d" % number, {"state": "closed", "state_reason": "not_planned"})
+                if not issue.get("locked"):
+                    github.call("PUT", "/issues/%d/lock" % number, {"lock_reason": "spam"}, allow=(422,))
+            else:
+                github.call("DELETE", "/issues/comments/%d" % item["id"], allow=(404,))
+                removed += 1
+        if blocked:
+            comments = [c for c in comments if all(c is not item for item in blocked)]
+            fingerprint = content_fingerprint(issue, comments)
+            findings = check_texts(issue, comments, complete)
         if held:
             findings = findings or [("The issue", ["review"], None)]
     # Every flag goes to the owner the same way, so a tripwire looks like any other flag.
@@ -631,7 +742,7 @@ def main():
     github.set_label(number, labels, REVIEWED, reviewed)
     github.set_label(number, labels, CLARIFY, bool(missing))
 
-    body = report(findings, missing, kind, fingerprint, strikes, held, reviewed)
+    body = report(findings, missing, kind, fingerprint, strikes, held, reviewed, removed)
     if body and own and own["body"] != body:
         github.call("PATCH", "/issues/comments/%d" % own["id"], {"body": body})
     elif body and not own:

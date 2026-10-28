@@ -46,7 +46,7 @@ The `Website` folder is the landing page template; `build-listing.yml` fills it 
 
 ## Issues
 
-Feature requests and bug reports use the forms in `.github/ISSUE_TEMPLATE`. [`issue-check.yml`](.github/workflows/issue-check.yml) runs [`scripts/issue_check.py`](scripts/issue_check.py) on every issue and comment change. It flags links, instruction-override phrases, AI-directed text, prompt markup, requests for secrets or commands, HTML and CSS, math formatting, styled or hidden characters, look-alike letters, encoded data and very long text. It also checks the forms' required sections, and comments with what to fix.
+Feature requests and bug reports use the forms in `.github/ISSUE_TEMPLATE`. [`issue-check.yml`](.github/workflows/issue-check.yml) runs [`scripts/issue_check.py`](scripts/issue_check.py) on every issue and comment change. Links, prompt markup, HTML and CSS, math formatting, styled or hidden characters, look-alike letters, text that is not in English, encoded data and very long text are flagged outright. Wording aimed at an AI reader (instruction-override phrases, AI-directed text, requests for secrets or commands) is scored instead: each phrase pattern has a weight, a text scoring 0.45 or more is flagged, and one scoring 0.8 or more is taken down. One person's wording is scored across all their comments, so splitting it up does not lower it. It also checks the forms' required sections, and comments with what to fix.
 
 Labels:
 
@@ -55,9 +55,9 @@ Labels:
 3. `security: reviewed`: the owner reviewed the current text. To clear a false positive, read the issue and every comment, then post a comment that is exactly `reviewed <fingerprint>`, with the 64-character fingerprint from the check's comment. Only your latest review counts, and any later change to the text gives a new fingerprint and needs a new review.
 4. `needs clarification`: required form sections are missing.
 
-The owner is assigned to every flagged issue. After three flagged edits by the same person, the flag is held: a review clears it only for the text reviewed, and any later change needs a new review.
+An outsider's comment scoring 0.8 or more is deleted, and an outsider's issue scoring 0.8 or more is closed and locked as spam (only admins can delete issues); either holds the issue. The owner is assigned to every flagged issue. After three flagged edits by the same person, the flag is held: a review clears it only for the text reviewed, and any later change needs a new review.
 
-Text from the owner, members and collaborators skips the link, path, HTML and encoding checks but gets every check aimed at AI readers, since it may relay outsider text. A conversation over 200,000 characters, or one too slow to check, is flagged for review. Characters outside plain text (ASCII, Latin-1, Latin Extended-A, common punctuation, arrows, box drawing and emoji) are flagged.
+Text from the owner, members and collaborators skips the link, path, HTML and encoding checks but gets every check aimed at AI readers, since it may relay outsider text. A conversation over 200,000 characters, or one too slow to check, is flagged for review. Only English is accepted: characters outside plain English text (ASCII, common symbols and punctuation, arrows, box drawing and emoji) are flagged, and so is text written mostly with common words of other languages.
 
 ## Tests
 
