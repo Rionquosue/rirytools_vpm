@@ -10,23 +10,19 @@ Or open [the listing page](https://rionquosue.github.io/rirytools_vpm/) and pres
 
 ## How it is built
 
-1. Every hour, [`build-package.yml`](.github/workflows/build-package.yml) builds [Rionquosue/riryunityworkflow](https://github.com/Rionquosue/riryunityworkflow)'s `main` with [`scripts/build_vpm.py`](scripts/build_vpm.py) (without `Docs~` and dot files) using the latest release's version, and compares the zip with that release. If it differs, it publishes release `v<next version>` with the zip and `package.json`. No token connects the two repositories.
+1. A push to `main` or `beta` of [Rionquosue/riryunityworkflow](https://github.com/Rionquosue/riryunityworkflow) (the source) runs its `notify-vpm.yml`, which starts [`build-package.yml`](.github/workflows/build-package.yml) here with the channel (`stable` for `main`, `beta` for `beta`) and the commit.
 
-   All version information is in this repository. The source repository has no `package.json`: the zip gets [`package.json`](package.json) from here, with `version` and `url` filled in. Each change to source `main` is published as the next patch version. To publish a minor or major version, raise `"version"` in this repository's `package.json` above the latest release; the next run publishes that version. The release notes name the source commit and this repository's commit, whose `package.json` was used.
+2. [`scripts/build_vpm.py`](scripts/build_vpm.py) zips the source's `com.riry.rirytools` folder (without dot files) (`.meta` files included) with [`package.json`](package.json) from here, the version and url filled in.
 
-2. It never reuses or overwrites a release it did not make: [`scripts/verify_release.py`](scripts/verify_release.py) requires the release and both assets to come from `github-actions[bot]` and the zip to match the build, and the run fails otherwise.
+3. Versions come only from this repository's releases. A stable version is the previous stable release plus one patch (`0.7.2` to `0.7.3`; `0.0.1` if there is none). A beta is the next stable version with `-beta.N` (`0.7.3-beta.1`, `0.7.3-beta.2`) and is released as a prerelease. For a minor or major version, run **Build Package** by hand with the `version` input.
 
-3. It then runs [`build-listing.yml`](.github/workflows/build-listing.yml), VRChat's [package-list-action](https://github.com/vrchat-community/package-list-action) (pinned to a commit), which builds `index.json` and the landing page from the releases. [`scripts/verify_listing.py`](scripts/verify_listing.py) rejects any package other than `com.riry.rirytools`, any version whose release was not made by the build, and any zip whose SHA-256 differs. Each version must also be reproducible: the source commit named in its release notes must be on source `main`, and rebuilding it with its version and the `package.json` of this repository's commit in the notes must give the identical zip. A version from before the `package.json` template (v0.7.0) is instead checked against its deployed listing entry and SHA-256. It writes a summary of what will be served.
+4. If the zip, built with the previous release's version, is identical to that release's zip, the run fails with "No change": nothing in the package changed.
 
-4. The check runs in its own job, on the exact artifact that will be deployed: only the files in `Website/` plus `index.json`, static files unchanged, pages loading only the template's scripts and linking only to known addresses, listing fields matching `source.json`, and each version's entry matching its rebuilt `package.json`. A version already deployed with a different SHA-256 is rejected: a published zip never changes.
+5. The release `v<version>` gets the zip and `package.json`, then [`build-listing.yml`](.github/workflows/build-listing.yml) runs VRChat's [package-list-action](https://github.com/vrchat-community/package-list-action) (pinned to a commit) to build `index.json` and the landing page. [`scripts/verify_listing.py`](scripts/verify_listing.py) checks the artifact: only the files in `Website/` plus `index.json`, static files unchanged, pages loading only the template's scripts and linking only to known addresses, listing fields matching `source.json`, only `com.riry.rirytools`, and each version's url pointing at its release here.
 
-5. The deploy job waits in the `github-pages` environment for the owner's approval. Read the summary on the run page, then approve.
-
-6. Every day, [`audit-listing.yml`](.github/workflows/audit-listing.yml) checks the deployed listing the same way, rebuilding every version. A failed audit means a published zip changed.
+6. The deploy job waits in the `github-pages` environment for the owner's approval. Read the summary on the run page, then approve. Betas show in the VCC only for users who turn on pre-release packages.
 
 ## Setup
-
-In this repository:
 
 1. **Settings > Pages > Build and deployment > Source:** GitHub Actions.
 
@@ -34,13 +30,11 @@ In this repository:
 
 3. **Settings > Secrets and variables > Actions > Variables:** `TRIPWIRE_HASHES`, the comma-separated tripwire hashes for the issue check. Until it is set, the issue check fails and no issue is marked as passed.
 
-4. **Settings > Secrets and variables > Actions > Secrets:** delete `SOURCE_REPO_TOKEN`; it is no longer used.
+4. In `Rionquosue/riryunityworkflow`, add the secret `VPM_DISPATCH_TOKEN`: a fine-grained personal access token with access to `Rionquosue/rirytools_vpm` only and the single permission **Actions: Read and write**. It can start workflows here and nothing else.
 
-In `Rionquosue/riryunityworkflow`: delete `.github/workflows/notify-vpm.yml` and the `VPM_DISPATCH_TOKEN` secret, and revoke that token.
+5. Create a `beta` branch in both repositories from `main`. The `beta` branch here is only for trying changes to these scripts; builds always run from `main`.
 
-To publish without waiting for the hourly check, run **Build Package** from this repository's Actions tab. If a release exists but its listing never deployed, run **Build Repo Listing** by hand.
-
-GitHub turns off scheduled workflows in public repositories after 60 days without activity and emails the owner. Re-enable **Build Package** and **Audit Listing** from the Actions tab if that happens.
+To publish by hand, run **Build Package** from the Actions tab. If a release exists but its listing never deployed, run **Build Repo Listing** by hand.
 
 ## Customizing the landing page
 
