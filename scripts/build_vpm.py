@@ -27,8 +27,10 @@ import sys
 import zipfile
 
 PACKAGE_NAME = "com.riry.rirytools"
-STABLE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
-BETA = re.compile(r"(\d+)\.(\d+)\.(\d+)-beta\.(\d+)")
+# No leading zeros, so each version has one spelling.
+NUMBER = r"(0|[1-9][0-9]*)"
+STABLE = re.compile(r"%s\.%s\.%s" % (NUMBER, NUMBER, NUMBER))
+BETA = re.compile(r"%s\.%s\.%s-beta\.%s" % (NUMBER, NUMBER, NUMBER, NUMBER))
 FIELDS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "package.json")
 LFS_POINTER = b"version https://git-lfs.github.com/spec/"
 FIXED_TIME = (2020, 1, 1, 0, 0, 0)
