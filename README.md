@@ -10,7 +10,7 @@ Or open [the listing page](https://rionquosue.github.io/rirytools_vpm/) and pres
 
 ## How it is built
 
-1. Every hour, [`build-package.yml`](.github/workflows/build-package.yml) builds [Rionquosue/riryunityworkflow](https://github.com/Rionquosue/riryunityworkflow)'s `main` with [`scripts/build_vpm.py`](scripts/build_vpm.py) (without `Docs~`, `TestProject~` and dot files) using the latest release's version, and compares the zip with that release. If it differs, it publishes release `v<next version>` with the zip and `package.json`. No token connects the two repositories.
+1. Every hour, [`build-package.yml`](.github/workflows/build-package.yml) builds [Rionquosue/riryunityworkflow](https://github.com/Rionquosue/riryunityworkflow)'s `main` with [`scripts/build_vpm.py`](scripts/build_vpm.py) (without `Docs~` and dot files) using the latest release's version, and compares the zip with that release. If it differs, it publishes release `v<next version>` with the zip and `package.json`. No token connects the two repositories.
 
    All version information is in this repository. The source repository has no `package.json`: the zip gets [`package.json`](package.json) from here, with `version` and `url` filled in. Each change to source `main` is published as the next patch version. To publish a minor or major version, raise `"version"` in this repository's `package.json` above the latest release; the next run publishes that version. The release notes name the source commit and this repository's commit, whose `package.json` was used.
 

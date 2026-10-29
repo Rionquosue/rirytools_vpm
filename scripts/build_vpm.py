@@ -33,7 +33,7 @@ TEMPLATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "packa
 LFS_POINTER = b"version https://git-lfs.github.com/spec/"
 # Top-level entries of the source repository that are not part of the package. Its package.json
 # is replaced by the template.
-EXCLUDED_TOP_LEVEL = {"Docs~", "TestProject~"}
+EXCLUDED_TOP_LEVEL = {"Docs~"}
 EXCLUDED_FILES = {"package.json"}
 FIXED_TIME = (2020, 1, 1, 0, 0, 0)
 
