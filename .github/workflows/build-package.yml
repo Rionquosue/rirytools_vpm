@@ -24,6 +24,8 @@ env:
 
 jobs:
   check:
+    # Runs only in the main repository, never in forks such as rirytools_vpm_dev.
+    if: github.repository == 'Rionquosue/rirytools_vpm'
     runs-on: ubuntu-latest
     outputs:
       build: ${{ steps.check.outputs.build }}

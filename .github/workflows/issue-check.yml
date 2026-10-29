@@ -22,7 +22,8 @@ concurrency:
 
 jobs:
   issue-check:
-    if: ${{ !github.event.issue.pull_request }}
+    # Runs only in the main repository, never in forks such as rirytools_vpm_dev.
+    if: ${{ github.repository == 'Rionquosue/rirytools_vpm' && !github.event.issue.pull_request }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
