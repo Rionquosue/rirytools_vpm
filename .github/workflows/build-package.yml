@@ -1,7 +1,11 @@
-# Builds the RiryTools VPM package when the source repository's main branch has a
-# version that is not released yet, publishes it as a release of this repository,
-# then starts build-listing.yml. Nothing reaches VCC users until the owner approves
-# the listing's Pages deployment (see build-listing.yml).
+# Builds the RiryTools VPM package from the source repository's main branch when it
+# differs from the latest release, publishes it as a release of this repository with
+# the next version, then starts build-listing.yml. Nothing reaches VCC users until the
+# owner approves the listing's Pages deployment (see build-listing.yml).
+#
+# All version information comes from this repository: the latest release, and the
+# "version" in the package.json template here, which raises the version to publish
+# (minor and major bumps). The source repository's package.json is not used.
 #
 # It polls hourly instead of being dispatched, so no personal access token exists.
 # Only the current commit of the source repository's main branch is ever built.
@@ -30,10 +34,13 @@ jobs:
     outputs:
       build: ${{ steps.check.outputs.build }}
       sha: ${{ steps.check.outputs.sha }}
+      version: ${{ steps.check.outputs.version }}
     steps:
+      # Full history of both, to rebuild the latest release from the commits named in its notes.
       - name: Check out this repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Check out the source repository
@@ -42,29 +49,37 @@ jobs:
           repository: ${{ env.SOURCE_REPOSITORY }}
           ref: main
           path: source
+          fetch-depth: 0
           persist-credentials: false
           lfs: true
 
-      # A release this workflow did not make, or whose zip does not match, is never
-      # reused or overwritten: the run fails so the owner can look at it.
-      - name: Check for an existing release
+      # The latest release must be one this workflow made and must rebuild from the commits in
+      # its notes; otherwise the run fails so the owner can look at it. Source main is then
+      # built with the latest release's version: a different zip means main has new content.
+      - name: Compare source main with the latest release
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          version=$(python3 -I scripts/build_vpm.py version --source source)
           sha=$(git -C source rev-parse HEAD)
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          # Only a 404 means "not released"; any other API error fails the run.
-          if ! release=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$version" 2> "$RUNNER_TEMP/error"); then
-            grep -q "HTTP 404" "$RUNNER_TEMP/error" || { cat "$RUNNER_TEMP/error"; exit 1; }
-            echo "build=true" >> "$GITHUB_OUTPUT"
+          latest=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[].tag_name' | python3 -I scripts/build_vpm.py latest)
+          if [ -z "$latest" ]; then
+            version=$(python3 -I scripts/build_vpm.py next)
+          else
+            python3 -I scripts/verify_listing.py --release "v$latest" --source source
+            release=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$latest")
+            GITHUB_OUTPUT=/dev/null python3 -I scripts/build_vpm.py build --source source --version "$latest" --repository "$GITHUB_REPOSITORY" --dist dist
+            if echo "$release" | python3 -I scripts/verify_release.py --zip dist/*.zip > /dev/null; then changed=false; else changed=true; fi
+            version=$(python3 -I scripts/build_vpm.py next --latest "$latest" --changed "$changed")
+          fi
+          if [ -z "$version" ]; then
+            echo "Source main is unchanged since v$latest. If its listing never deployed, run Build Repo Listing by hand."
             exit 0
           fi
-          GITHUB_OUTPUT=/dev/null python3 -I scripts/build_vpm.py build --source source --repository "$GITHUB_REPOSITORY" --dist dist
-          echo "$release" | python3 -I scripts/verify_release.py --zip dist/*.zip
-          echo "Version $version is already released. Bump \"version\" in package.json to publish a new one."
-          echo "If its listing never deployed, run Build Repo Listing by hand."
+          echo "Publishing $version (latest release: ${latest:-none})."
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "build=true" >> "$GITHUB_OUTPUT"
 
   build:
     needs: check
@@ -97,7 +112,9 @@ jobs:
 
       - name: Build the package
         id: build
-        run: python3 -I scripts/build_vpm.py build --source source --repository "$GITHUB_REPOSITORY"
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        run: python3 -I scripts/build_vpm.py build --source source --version "$VERSION" --repository "$GITHUB_REPOSITORY"
 
       # Never reuse or overwrite a release or tag that appeared since the check.
       - name: Publish the release
@@ -112,7 +129,7 @@ jobs:
             echo "::error::$TAG appeared since the check. Not touching it; review it by hand."; exit 1
           fi
           gh release create "$TAG" "$ZIP" dist/package.json --target main --title "$TITLE" \
-            --notes "Built from $SOURCE_REPOSITORY@$(git -C source rev-parse HEAD)."
+            --notes "Built from $SOURCE_REPOSITORY@$(git -C source rev-parse HEAD) with $GITHUB_REPOSITORY@$GITHUB_SHA."
           gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" | python3 -I scripts/verify_release.py --zip "$ZIP"
 
       # Releases made with the workflow token do not start other workflows, so start the listing build here.
