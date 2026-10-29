@@ -53,8 +53,9 @@ jobs:
           persist-credentials: false
           lfs: true
 
-      # The latest release must be one this workflow made and must rebuild from the commits in
-      # its notes; otherwise the run fails so the owner can look at it. Source main is then
+      # A "version" in the package.json template above the latest release is published as is.
+      # Otherwise the latest release must be one this workflow made and must rebuild from the
+      # commits in its notes, or the run fails so the owner can look at it. Source main is then
       # built with the latest release's version: a different zip means main has new content.
       - name: Compare source main with the latest release
         id: check
@@ -67,6 +68,9 @@ jobs:
           if [ -z "$latest" ]; then
             version=$(python3 -I scripts/build_vpm.py next)
           else
+            version=$(python3 -I scripts/build_vpm.py next --latest "$latest" --changed false)
+          fi
+          if [ -n "$latest" ] && [ -z "$version" ]; then
             python3 -I scripts/verify_listing.py --release "v$latest" --source source
             release=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$latest")
             GITHUB_OUTPUT=/dev/null python3 -I scripts/build_vpm.py build --source source --version "$latest" --repository "$GITHUB_REPOSITORY" --dist dist

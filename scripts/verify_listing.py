@@ -25,7 +25,9 @@ template's scripts and linking only to known addresses.
 
 The template is read from this repository's commit named in the release notes,
 which must be on this repository's main. Releases from before the template have
-no such commit and are rebuilt with the template as it was first added.
+no such commit: one already deployed with the same SHA-256 is checked against
+the deployed listing entry instead of rebuilt, and any other is rebuilt with the
+template as it was first added.
 
 Usage: python3 scripts/verify_listing.py --artifact <artifact.tar> --source <full clone of the source repository>
        python3 scripts/verify_listing.py <index.json> --source ...
@@ -323,7 +325,12 @@ def main():
             else:
                 issues += problems(data, zip_name, "sha256:" + sha)
                 # Every version is rebuilt: cheap, and it ties each entry's fields to reviewed source.
-                if source:
+                # A release from before the template, already deployed unchanged, was checked then.
+                previous = ((published or {}).get("packages", {}).get(name, {}).get("versions", {})).get(version)
+                legacy = not re.search(r"%s@[0-9a-f]{40}\b" % re.escape(REPOSITORY), data.get("body") or "")
+                if legacy and previous is not None and previous.get("zipSHA256") == sha:
+                    issues += entry_problems(manifest, previous)
+                elif source:
                     rebuilt, rebuilt_manifest = rebuild(source, data, zip_name, version)
                     issues += rebuilt
                     if rebuilt_manifest is not None:
