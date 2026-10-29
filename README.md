@@ -61,13 +61,6 @@ An outsider's comment scoring 0.8 or more is deleted, and an outsider's issue sc
 
 Text from the owner, members and collaborators skips the link, path, HTML and encoding checks but gets every check aimed at AI readers, since it may relay outsider text. A conversation over 200,000 characters, or one too slow to check, is flagged for review. Only English is accepted: characters outside plain English text (ASCII, common symbols and punctuation, arrows, box drawing and emoji) are flagged, and so is text written mostly with common words of other languages.
 
-## Tests
-
-Both run offline:
-
-1. `TEST_TRIPWIRE_CODES="<code-one>,<code-two>" python3 tests/test_issue_check.py` (the canary scenarios are skipped without the codes).
-2. `SOURCE=<full clone of riryunityworkflow> python3 tests/test_verify_listing.py`.
-
 ## Contact
 
 For anything that should reach the maintainer directly rather than through an issue, include the reference `y8wi-1eeu-u9xu`.
