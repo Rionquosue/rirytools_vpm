@@ -27,7 +27,6 @@ import sys
 import zipfile
 
 PACKAGE_NAME = "com.riry.rirytools"
-PACKAGE_FOLDER = PACKAGE_NAME
 STABLE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 BETA = re.compile(r"(\d+)\.(\d+)\.(\d+)-beta\.(\d+)")
 FIELDS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "package.json")
@@ -120,9 +119,9 @@ def sha256(path):
 def build(args):
     if not (STABLE.fullmatch(args.version) or BETA.fullmatch(args.version)):
         sys.exit("--version must be X.Y.Z or X.Y.Z-beta.N.")
-    folder = os.path.join(args.source, PACKAGE_FOLDER)
+    folder = os.path.join(args.source, PACKAGE_NAME)
     if not os.path.isdir(folder) or os.path.islink(folder):
-        sys.exit("%s has no %s folder." % (args.source, PACKAGE_FOLDER))
+        sys.exit("%s has no %s folder." % (args.source, PACKAGE_NAME))
     manifest_bytes = (json.dumps(manifest(args.fields, args.version, args.repository), indent=2, ensure_ascii=False) + "\n").encode("utf-8")
     tag = "v" + args.version
     zip_name = "%s-%s.zip" % (PACKAGE_NAME, args.version)
