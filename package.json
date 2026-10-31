@@ -1,7 +1,7 @@
 {
   "name": "com.riry.rirytools",
   "displayName": "RiryTools",
-  "description": "Editor tools for Unity avatar and game projects: blendshape weight sync, animation key cleanup, reference-preserving GUID regeneration and repair, VRC constraint trains, folder import presets with Better FBX export, Git AutoSync for scenes and prefabs, and Play Mode window handling. Files that must live in the project are unpacked into Assets/RiryTools.",
+  "description": "Editor tools for Unity avatar and game projects: Git AutoSync for scenes and prefabs, blendshape weight sync, animation key cleanup, VRC constraint trains, reference-preserving GUID regeneration and repair, folder import presets with animation extraction and Better FBX export, Stop Auto Game, and Menu Mockup. Files that must live in the project are unpacked into Assets/RiryTools.",
   "unity": "2022.3",
   "author": {
     "name": "Riry"
