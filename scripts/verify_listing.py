@@ -9,8 +9,8 @@ byte-identical to Website/, and the rendered pages must load only the
 template's scripts and link only to known addresses. The listing's name, id,
 url and author must match source.json, its only package must be
 com.riry.rirytools, and each version's url must point at this repository's
-release for that version. It writes a summary of what will be served for the
-owner to read before approving the deployment.
+release for that version. It writes a summary of what will be served to the
+run page.
 """
 import json
 import os

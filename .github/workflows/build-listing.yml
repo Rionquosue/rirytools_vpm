@@ -1,11 +1,10 @@
 # Builds the VPM listing (index.json and the landing page) from this repository's
 # releases with VRChat's package-list-action, checks the built artifact in a
-# separate job with scripts/verify_listing.py, and deploys it to GitHub Pages.
+# separate job with scripts/verify_listing.py, and deploys it to GitHub Pages
+# without waiting: the owner's approval is the merge to the source's main.
 #
-# The deploy job uses the github-pages environment. Give that environment the
-# owner as a required reviewer and a main-only deployment branch rule: every
-# change to what VCC users download then waits for the owner's approval in the
-# GitHub UI, after reading the summary of what will be served.
+# The deploy job uses the github-pages environment, which Pages deployments need.
+# Give it a main-only deployment branch rule and no required reviewers.
 name: Build Repo Listing
 
 on:
@@ -62,7 +61,7 @@ jobs:
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
 
       # The two steps of actions/upload-pages-artifact, which calls upload-artifact by a movable tag,
-      # with upload-artifact pinned instead. Kept a week, so a late approval still finds the artifact.
+      # with upload-artifact pinned instead.
       - name: Archive the site
         run: tar --directory "$listPublishDirectory" -cvf "$RUNNER_TEMP/artifact.tar" --exclude=.git --exclude=.github .
 
@@ -95,8 +94,7 @@ jobs:
       - name: Verify the listing
         run: python3 -I scripts/verify_listing.py --artifact "$RUNNER_TEMP/pages/artifact.tar"
 
-  # Only deployments queue: a run waiting for approval does not hold up the next build and
-  # check, and the newest waiting deployment replaces an older one.
+  # Deployments queue in order; the newest waiting deployment replaces an older one.
   deploy:
     needs: verify-listing
     runs-on: ubuntu-latest

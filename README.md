@@ -20,13 +20,13 @@ Or open [the listing page](https://rionquosue.github.io/rirytools_vpm/) and pres
 
 5. The release `v<version>` gets the zip and `package.json`, then [`build-listing.yml`](.github/workflows/build-listing.yml) runs VRChat's [package-list-action](https://github.com/vrchat-community/package-list-action) (pinned to a commit) to build `index.json` and the landing page. [`scripts/verify_listing.py`](scripts/verify_listing.py) checks the artifact: only the files in `Website/` plus `index.json`, static files unchanged, pages loading only the template's scripts and linking only to known addresses, listing fields matching `source.json`, only `com.riry.rirytools`, and each version's url pointing at its release here.
 
-6. The deploy job waits in the `github-pages` environment for the owner's approval. Read the summary on the run page, then approve. Betas show in the VCC only for users who turn on pre-release packages.
+6. The deploy job then publishes it to GitHub Pages without waiting; merging to the source's `main` is the approval. Betas show in the VCC only for users who turn on pre-release packages.
 
 ## Setup
 
 1. **Settings > Pages > Build and deployment > Source:** GitHub Actions.
 
-2. **Settings > Environments > github-pages:** add yourself under **Required reviewers**, and under **Deployment branches and tags** allow only `main`.
+2. **Settings > Environments > github-pages:** leave **Required reviewers** empty, and under **Deployment branches and tags** allow only `main`.
 
 3. **Settings > Secrets and variables > Actions > Variables:** `TRIPWIRE_HASHES`, the comma-separated tripwire hashes for the issue check. Until it is set, the issue check fails and no issue is marked as passed.
 

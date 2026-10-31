@@ -1,8 +1,8 @@
 # Builds the RiryTools VPM package from the source repository's com.riry.rirytools
 # folder, publishes it as a release of this repository, then starts build-listing.yml.
 # Started by the source repository's notify-vpm.yml on every push to main (stable) or
-# beta (beta), or by hand. Nothing reaches VCC users until the owner approves the
-# listing's Pages deployment (see build-listing.yml).
+# beta (beta), or by hand. The listing is then rebuilt and deployed to VCC users
+# without further approval (see build-listing.yml).
 #
 # Versions come from this repository's releases or the version input (see
 # scripts/build_vpm.py). The run aborts when the package is unchanged since the
