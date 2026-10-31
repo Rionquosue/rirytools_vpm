@@ -24,7 +24,7 @@ on:
         required: false
         default: ""
       version:
-        description: "Version to publish (X.Y.Z, or X.Y.Z-beta.N for beta); empty for automatic"
+        description: "Version to publish (X.Y.Z, or X.Y.Z-beta.N for beta; Z at most 99); empty for automatic"
         required: false
         default: ""
 
@@ -55,8 +55,8 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           case "$CHANNEL" in
-            stable) branch=main; pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' ;;
-            beta) branch=beta; pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.(0|[1-9][0-9]*)$' ;;
+            stable) branch=main; pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]?)$' ;;
+            beta) branch=beta; pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]?)-beta\.(0|[1-9][0-9]*)$' ;;
             *) echo "::error::channel must be stable or beta."; exit 1 ;;
           esac
           [[ -z "$SHA" || "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha must be 40 lowercase hex."; exit 1; }

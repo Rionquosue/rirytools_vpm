@@ -9,8 +9,9 @@ Steps:
 
 All versions come from this repository's releases or the --version input; nothing
 is read from the source. Stable versions count up by patch from the previous
-stable release (0.0.1 when there is none). Beta versions are the next stable
-version with -beta.N, N counting up from 1.
+stable release (0.1.0 when there is none); after patch 99 the minor version goes
+up and the patch starts again at 0 (0.1.99 to 0.2.0). Beta versions are the next
+stable version with -beta.N, N counting up from 1.
 
 The zip holds the package folder's contents at its root, as the VRChat Creator
 Companion expects, with package.json from this repository's fields file and the
@@ -31,22 +32,33 @@ PACKAGE_NAME = "com.riry.rirytools"
 NUMBER = r"(0|[1-9][0-9]*)"
 STABLE = re.compile(r"%s\.%s\.%s" % (NUMBER, NUMBER, NUMBER))
 BETA = re.compile(r"%s\.%s\.%s-beta\.%s" % (NUMBER, NUMBER, NUMBER, NUMBER))
+FIRST = (0, 1, 0)
+MAX_PATCH = 99
 FIELDS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "package.json")
 LFS_POINTER = b"version https://git-lfs.github.com/spec/"
 FIXED_TIME = (2020, 1, 1, 0, 0, 0)
 
 
 
-def numbers(match):
-    return tuple(int(part) for part in match.groups())
+def parse(pattern, version):
+    """The version's numbers, or None when it does not match or its patch is over MAX_PATCH."""
+    match = pattern.fullmatch(version)
+    parts = tuple(int(part) for part in match.groups()) if match else None
+    return parts if parts and parts[2] <= MAX_PATCH else None
+
+
+def next_after(version):
+    """The stable version after (major, minor, patch): one more patch, or the next minor after MAX_PATCH."""
+    major, minor, patch = version[:3]
+    return (major, minor, patch + 1) if patch < MAX_PATCH else (major, minor + 1, 0)
 
 
 def plan(tags, channel, requested):
     """(previous release on the channel or None, version to publish)."""
     versions = [tag.strip()[1:] for tag in tags if tag.strip().startswith("v")]
-    stable = [numbers(m) for m in (STABLE.fullmatch(v) for v in versions) if m]
-    beta = [numbers(m) for m in (BETA.fullmatch(v) for v in versions) if m]
-    next_stable = (max(stable)[0], max(stable)[1], max(stable)[2] + 1) if stable else (0, 0, 1)
+    stable = [n for n in (parse(STABLE, v) for v in versions) if n]
+    beta = [n for n in (parse(BETA, v) for v in versions) if n]
+    next_stable = next_after(max(stable)) if stable else FIRST
     if channel == "stable":
         previous = "%d.%d.%d" % max(stable) if stable else None
         automatic = "%d.%d.%d" % next_stable
@@ -119,8 +131,8 @@ def sha256(path):
 
 
 def build(args):
-    if not (STABLE.fullmatch(args.version) or BETA.fullmatch(args.version)):
-        sys.exit("--version must be X.Y.Z or X.Y.Z-beta.N.")
+    if not (parse(STABLE, args.version) or parse(BETA, args.version)):
+        sys.exit("--version must be X.Y.Z or X.Y.Z-beta.N, with Z at most %d." % MAX_PATCH)
     folder = os.path.join(args.source, PACKAGE_NAME)
     if not os.path.isdir(folder) or os.path.islink(folder):
         sys.exit("%s has no %s folder." % (args.source, PACKAGE_NAME))
@@ -155,8 +167,8 @@ def main():
         if not args.channel:
             parser.error("--channel is required for plan")
         pattern = STABLE if args.channel == "stable" else BETA
-        if args.version and not pattern.fullmatch(args.version):
-            parser.error("--version must be %s for the %s channel" % ("X.Y.Z" if args.channel == "stable" else "X.Y.Z-beta.N", args.channel))
+        if args.version and not parse(pattern, args.version):
+            parser.error("--version must be %s for the %s channel, with Z at most %d" % ("X.Y.Z" if args.channel == "stable" else "X.Y.Z-beta.N", args.channel, MAX_PATCH))
         previous, version = plan(sys.stdin, args.channel, args.version)
         print("previous=%s\nversion=%s" % (previous or "", version))
         return
