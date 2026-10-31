@@ -26,7 +26,9 @@ SOURCE_JSON = os.path.join(HERE, "..", "source.json")
 TEMPLATED = {"index.html", "app.js"}
 ADDRESS = re.compile(r"""(?:https?|vcc)://[^\s"'<>)\]}`]+""")
 SCRIPT_TAG = re.compile(r"<script\b[^>]*>", re.IGNORECASE)
-IMPORT = re.compile(r"""\bimport\b[^;'"]*['"][^'"]+['"]""")
+# An import statement where one can start (line start, or after ; { } or a tag's >), or a dynamic
+# import(), so the word "import" in rendered package text ("import presets") is not counted.
+IMPORT = re.compile(r"""(?m)(?:^|[;{}>])\s*import\b[^;'"]*['"][^'"]+['"]|\bimport\s*\(\s*['"][^'"]+['"]""")
 
 
 def read_artifact(path):
