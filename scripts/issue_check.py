@@ -9,6 +9,10 @@ Labels:
   issue-check: passed  Every check passed. Issue triage reads only issues with this
                        label. It is removed first on every run, so a failed run
                        leaves the issue unread.
+  valid                No text failed a security check; missing form sections do
+                       not matter. Also removed first on every run.
+  invalid              Text in the issue or a comment failed a security check. The
+                       conversation is locked until the owner reviews it.
   security: flagged    Text failed a security check.
   security: reviewed   The owner commented "reviewed <fingerprint>" for the current text.
                        Set by this check; any change to the text gives a new fingerprint.
@@ -17,8 +21,7 @@ Labels:
 Formatting, links, characters and language checks trip on their own. Wording aimed at
 an AI reader is scored instead: each WORDING pattern has a weight, and a text's score
 combines the weights of the patterns it matches. A score of REVIEW_SCORE flags the text;
-BLOCK_SCORE removes an outsider's comment, or closes and locks an outsider's issue, and
-holds the issue. Text must be English in plain characters (ASCII, common symbols,
+an outsider's BLOCK_SCORE also holds the issue. Text must be English in plain characters (ASCII, common symbols,
 punctuation, arrows, box drawing and emoji). The owner is assigned to every flagged
 issue. After %d flagged edits by the same person, or when a tripwire code is found,
 the flag is held until the owner reviews it.
@@ -41,16 +44,19 @@ PASSED = "issue-check: passed"
 FLAGGED = "security: flagged"
 REVIEWED = "security: reviewed"
 CLARIFY = "needs clarification"
+VALID = "valid"
+INVALID = "invalid"
 FEATURE = "feature request"
 BUG = "bug"
-LABEL_COLORS = {PASSED: "0e8a16", FLAGGED: "b60205", REVIEWED: "5319e7", CLARIFY: "fbca04", FEATURE: "a2eeef", BUG: "d73a4a"}
+LABEL_COLORS = {PASSED: "0e8a16", FLAGGED: "b60205", REVIEWED: "5319e7", CLARIFY: "fbca04", FEATURE: "a2eeef", BUG: "d73a4a",
+                VALID: "0e8a16", INVALID: "b60205"}
 MAINTAINERS = {"OWNER", "MEMBER", "COLLABORATOR"}
 MAX_LENGTH = 8000
 MAX_COMMENTS = 1000
 HOLD_AFTER = 3
 MAX_JOINED = 200000
 TIME_BUDGET = 300
-# Wording scores (0 to 1) at which text is flagged, and at which it is removed and the issue held.
+# Wording scores (0 to 1) at which text is flagged, and at which an outsider's text holds the issue.
 REVIEW_SCORE = 0.45
 BLOCK_SCORE = 0.8
 # Checks that do not apply to maintainers' own text (their links, paths and formatting are trusted);
@@ -275,7 +281,7 @@ PATTERNS = {
 # Wording patterns, matched like PATTERNS, as (weight, pattern). A weight is how strongly a match
 # alone reads as prompt injection: REVIEW_SCORE or more flags the text by itself, and weaker
 # matches flag it only together. Weights combine as 1 - (1 - w1)(1 - w2)..., so 0.65 and 0.5
-# give 0.825 (removed), and 0.3 and 0.25 give 0.475 (flagged). Each pattern counts once per text, however often it matches.
+# give 0.825 (held), and 0.3 and 0.25 give 0.475 (flagged). Each pattern counts once per text, however often it matches.
 WORDING = {
     "lookup": [
         (0.3, rx(r"\b(?:visit|browse|go to|navigate to|look up|lookup|check out|fetch|download|search|google|follow|click|open)\b"
@@ -484,14 +490,14 @@ def issue_type(issue):
     return next((t for t in ISSUE_TYPES if t["label"] in names or title.startswith(t["prefix"])), None)
 
 
-def report(findings, missing, kind, fingerprint, strikes, held, reviewed=False, removed=0):
+def report(findings, missing, kind, fingerprint, strikes, held, reviewed=False):
     """The bot comment for these results, or None when everything passes and there is no state to keep."""
-    if not findings and not missing and not strikes and not held and not removed:
+    if not findings and not missing and not strikes and not held:
         return None
     state = ",".join("%s:%d" % item for item in sorted(strikes.items()))
-    lines = [MARKER, "<!-- state strikes=%s held=%d removed=%d -->" % (state, int(held), removed), "**Automated issue check**", ""]
-    if removed:
-        lines += ["%d comment%s that read as prompt injection %s removed." % (removed, "s" * (removed > 1), "were" if removed > 1 else "was"), ""]
+    lines = [MARKER, "<!-- state strikes=%s held=%d -->" % (state, int(held)), "**Automated issue check**", ""]
+    if findings:
+        lines += ["This issue is labelled `%s` and its conversation is locked until the owner reviews it." % INVALID, ""]
     if reviewed:
         lines += ["The owner reviewed the current text. Any change to it needs a new review.", ""]
     elif held:
@@ -608,15 +614,15 @@ def login_of(item):
 
 
 def review_texts(issue, comments, complete):
-    """Findings for an issue as (where, check names, author login) tuples, the outsider texts (the
-    issue or comments) that scored BLOCK_SCORE, and whether the issue must be held.
+    """Findings for an issue as (where, check names, author login) tuples, and whether the issue
+    must be held: an outsider's text, their texts together, or the whole conversation scored BLOCK_SCORE.
 
     Every readable text is scanned; maintainers' text skips MAINTAINER_EXEMPT. One outsider's
     wording is also scored across all their texts, so splitting it over several comments does not
     lower it. The conversation read as one text is checked too, counting only wording that appears
     where texts meet, so ordinary words in different people's comments do not add up. An
     over-long conversation or a run past TIME_BUDGET fails closed."""
-    findings, blocked, hold = [], [], False
+    findings, hold = [], False
     texts, seen, people = [], set(), {}
     started = time.monotonic()
     items = [("The issue", issue_text(issue), issue)] + [
@@ -624,7 +630,7 @@ def review_texts(issue, comments, complete):
     for where, text, item in items:
         if time.monotonic() - started > TIME_BUDGET:
             findings.append(("The conversation", ["volume"], None))
-            return findings, blocked, hold
+            return findings, hold
         # Over-long text is flagged without scanning, which keeps every run short.
         found, hits = ({"length"}, set()) if len(text) > MAX_LENGTH else assess(text)
         if is_maintainer(item):
@@ -632,7 +638,7 @@ def review_texts(issue, comments, complete):
             hits = {hit for hit in hits if hit[0] not in MAINTAINER_EXEMPT}
         else:
             if score(hits) >= BLOCK_SCORE:
-                blocked.append(item)
+                hold = True
             # Deleted accounts all show as "ghost" (or no user), so each of their texts stands alone.
             user = item.get("user") or {}
             key = user.get("id") if user.get("login") not in (None, "ghost") else ("deleted", id(item))
@@ -663,7 +669,7 @@ def review_texts(issue, comments, complete):
             findings.append(("The conversation as a whole", whole, None))
     if not complete:
         findings.append(("The comments", ["volume"], None))
-    return findings, blocked, hold
+    return findings, hold
 
 
 def check_texts(issue, comments, complete):
@@ -683,13 +689,15 @@ def main():
     action = event.get("action")
 
     # Fail closed before anything else: triage reads nothing unless this run finishes and passes.
-    github.call("DELETE", "/issues/%d/labels/%s" % (number, urllib.parse.quote(PASSED, safe="")), allow=(404,))
+    for name in (PASSED, VALID):
+        github.call("DELETE", "/issues/%d/labels/%s" % (number, urllib.parse.quote(name, safe="")), allow=(404,))
     issue = github.call("GET", "/issues/%d" % number)
-    labels = {label["name"] for label in issue.get("labels", [])} - {PASSED}
+    labels = {label["name"] for label in issue.get("labels", [])} - {PASSED, VALID}
     comments, complete = github.comments(number)
     own = next((c for c in comments if is_own_report(c)), None)
     fingerprint = content_fingerprint(issue, comments)
-    state = re.search(r"<!-- state strikes=([\w\-\[\]:,]*) held=([01])(?: removed=(\d+))? -->", (own or {}).get("body") or "")
+    # Older reports also carry "removed=<n>", from when flagged comments were deleted.
+    state = re.search(r"<!-- state strikes=([\w\-\[\]:,]*) held=([01])(?: removed=\d+)? -->", (own or {}).get("body") or "")
     strikes = {}
     if state:
         for entry in filter(None, state.group(1).split(",")):
@@ -697,12 +705,11 @@ def main():
             if who and count.isdigit():
                 strikes[who] = int(count)
     held = bool(state) and state.group(2) == "1"
-    removed = int(state.group(3) or 0) if state else 0
 
     # The owner's latest review covers exactly the text it names; any change gives a new fingerprint.
     # It is checked first, so the owner can always clear an issue, however slow it is to scan.
     reviewed = latest_review(comments) == fingerprint
-    findings, blocked, hold = ([], [], False) if reviewed else review_texts(issue, comments, complete)
+    findings, hold = ([], False) if reviewed else review_texts(issue, comments, complete)
     if not reviewed:
         authors = {author for _, _, author in findings}
         login = sender.get("login") or ""
@@ -710,46 +717,36 @@ def main():
         if (findings and login != owner and action in ("opened", "edited", "created", "reopened")
                 and (login in authors or None in authors)):
             strikes[login] = strikes.get(login, 0) + 1
-        if (hold or blocked or any("review" in checks for _, checks, _ in findings)
+        if (hold or any("review" in checks for _, checks, _ in findings)
                 or any(n >= HOLD_AFTER for n in strikes.values())):
             held = True
-        # Outsider text that scored BLOCK_SCORE is taken down: a comment is deleted, and an issue is
-        # closed and locked (only admins can delete issues). Changes made with the workflow token start
-        # no new run, so this run goes on to check what is left.
-        for item in blocked:
-            if item is issue:
-                if issue.get("state") != "closed":
-                    github.call("PATCH", "/issues/%d" % number, {"state": "closed", "state_reason": "not_planned"})
-                if not issue.get("locked"):
-                    github.call("PUT", "/issues/%d/lock" % number, {"lock_reason": "spam"}, allow=(422,))
-            else:
-                github.call("DELETE", "/issues/comments/%d" % item["id"], allow=(404,))
-                removed += 1
-        if blocked:
-            comments = [c for c in comments if all(c is not item for item in blocked)]
-            fingerprint = content_fingerprint(issue, comments)
-            findings = check_texts(issue, comments, complete)
         if held:
             findings = findings or [("The issue", ["review"], None)]
     # Every flag goes to the owner the same way, so a tripwire looks like any other flag.
     if findings and owner not in [a["login"] for a in issue.get("assignees") or []]:
         github.call("POST", "/issues/%d/assignees" % number, {"assignees": [owner]}, allow=(422,))
+    # Flagged text in the issue or any comment locks the conversation, so nothing more can be added
+    # to it until the owner has reviewed it and unlocks it. The issue stays open.
+    if findings and not issue.get("locked"):
+        github.call("PUT", "/issues/%d/lock" % number, allow=(422,))
 
     kind = issue_type(issue)
     missing = missing_sections(issue.get("body"), kind["required"]) if kind else []
 
     github.set_label(number, labels, FLAGGED, bool(findings))
+    github.set_label(number, labels, INVALID, bool(findings))
     github.set_label(number, labels, REVIEWED, reviewed)
     github.set_label(number, labels, CLARIFY, bool(missing))
 
-    body = report(findings, missing, kind, fingerprint, strikes, held, reviewed, removed)
+    body = report(findings, missing, kind, fingerprint, strikes, held, reviewed)
     if body and own and own["body"] != body:
         github.call("PATCH", "/issues/comments/%d" % own["id"], {"body": body})
     elif body and not own:
         github.call("POST", "/issues/%d/comments" % number, {"body": body})
     elif not body and own:
         github.call("DELETE", "/issues/comments/%d" % own["id"], allow=(404,))
-    # Last, so the issue is only marked as passed once its report is up to date.
+    # Last, so the issue is only marked as passed or valid once its report is up to date.
+    github.set_label(number, labels, VALID, not findings)
     github.set_label(number, labels, PASSED, not findings and not missing)
 
     # Workflow logs are public: give the outcome only.
