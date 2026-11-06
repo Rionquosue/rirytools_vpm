@@ -1,17 +1,29 @@
-# Builds the RiryTools VPM package from the source repository's com.riry.rirytools
-# folder, publishes it as a release of this repository, then starts build-listing.yml.
-# Started by the source repository's notify-vpm.yml on every push to main (stable) or
-# beta (beta), or by hand. The listing is then rebuilt and deployed to VCC users
+# Builds one VPM package from its source repository's package folder, publishes it
+# as a release of this repository, then starts build-listing.yml.
+#
+#   com.riry.rirytools          from Rionquosue/riryunityworkflow, tags vX.Y.Z
+#   com.riry.animatortemplates  from Rionquosue/riryanimatortemplates, tags animatortemplates-vX.Y.Z
+#
+# Started by each source repository's notify-vpm.yml on every push to main (stable)
+# or beta (beta), or by hand. The listing is then rebuilt and deployed to VCC users
 # without further approval (see build-listing.yml).
 #
-# Versions come from this repository's releases or the version input (see
-# scripts/build_vpm.py). The run aborts when the package is unchanged since the
-# previous release on its channel.
+# Versions come from the package's own releases here or the version input (see
+# scripts/build_vpm.py), so building one package never changes the other's version.
+# The run aborts when the package is unchanged since its previous release on the channel.
 name: Build Package
 
 on:
   workflow_dispatch:
     inputs:
+      package:
+        description: "Package to build"
+        required: true
+        default: com.riry.rirytools
+        type: choice
+        options:
+          - com.riry.rirytools
+          - com.riry.animatortemplates
       channel:
         description: "stable (source main) or beta (source beta)"
         required: true
@@ -35,9 +47,6 @@ concurrency:
   group: build-package
   cancel-in-progress: false
 
-env:
-  SOURCE_REPOSITORY: Rionquosue/riryunityworkflow
-
 jobs:
   build:
     # Runs only in the main repository, never in forks such as rirytools_vpm_dev.
@@ -50,10 +59,16 @@ jobs:
       - name: Check the inputs
         id: inputs
         env:
+          PACKAGE: ${{ inputs.package }}
           CHANNEL: ${{ inputs.channel }}
           SHA: ${{ inputs.sha }}
           VERSION: ${{ inputs.version }}
         run: |
+          case "$PACKAGE" in
+            com.riry.rirytools) source=Rionquosue/riryunityworkflow ;;
+            com.riry.animatortemplates) source=Rionquosue/riryanimatortemplates ;;
+            *) echo "::error::package is not one of this listing's packages."; exit 1 ;;
+          esac
           case "$CHANNEL" in
             stable) branch=main; pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]?)$' ;;
             beta) branch=beta; pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]?)-beta\.(0|[1-9][0-9]*)$' ;;
@@ -62,6 +77,7 @@ jobs:
           [[ -z "$SHA" || "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha must be 40 lowercase hex."; exit 1; }
           [[ -z "$VERSION" || "$VERSION" =~ $pattern ]] || { echo "::error::version does not fit the $CHANNEL channel."; exit 1; }
           echo "ref=${SHA:-$branch}" >> "$GITHUB_OUTPUT"
+          echo "source=$source" >> "$GITHUB_OUTPUT"
 
       - name: Check out this repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -71,7 +87,7 @@ jobs:
       - name: Check out the source repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          repository: ${{ env.SOURCE_REPOSITORY }}
+          repository: ${{ steps.inputs.outputs.source }}
           ref: ${{ steps.inputs.outputs.ref }}
           path: source
           persist-credentials: false
@@ -81,36 +97,42 @@ jobs:
         id: version
         env:
           GH_TOKEN: ${{ github.token }}
+          PACKAGE: ${{ inputs.package }}
           CHANNEL: ${{ inputs.channel }}
           VERSION: ${{ inputs.version }}
         run: |
           gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[].tag_name' > "$RUNNER_TEMP/tags"
-          python3 -I scripts/build_vpm.py plan --channel "$CHANNEL" --version "$VERSION" < "$RUNNER_TEMP/tags" | tee -a "$GITHUB_OUTPUT"
+          python3 -I scripts/build_vpm.py plan --package "$PACKAGE" --channel "$CHANNEL" --version "$VERSION" < "$RUNNER_TEMP/tags" | tee -a "$GITHUB_OUTPUT"
 
       # Built with the previous version, so only a change to the package itself gives a different zip.
       - name: Stop if nothing changed
         if: steps.version.outputs.previous != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          PACKAGE: ${{ inputs.package }}
           PREVIOUS: ${{ steps.version.outputs.previous }}
+          PREVIOUS_TAG: ${{ steps.version.outputs.previous_tag }}
         run: |
-          GITHUB_OUTPUT="$RUNNER_TEMP/previous" python3 -I scripts/build_vpm.py build --source source --version "$PREVIOUS" --repository "$GITHUB_REPOSITORY" --dist "$RUNNER_TEMP/previous-dist"
+          GITHUB_OUTPUT="$RUNNER_TEMP/previous" python3 -I scripts/build_vpm.py build --package "$PACKAGE" --source source --version "$PREVIOUS" --repository "$GITHUB_REPOSITORY" --dist "$RUNNER_TEMP/previous-dist"
           built=$(sed -n 's/^digest=//p' "$RUNNER_TEMP/previous")
-          released=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$PREVIOUS" --jq ".assets[] | select(.name == \"com.riry.rirytools-$PREVIOUS.zip\") | .digest")
+          released=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$PREVIOUS_TAG" --jq ".assets[] | select(.name == \"$PACKAGE-$PREVIOUS.zip\") | .digest")
           if [ "$built" = "$released" ]; then
-            echo "::error::No change in com.riry.rirytools since v$PREVIOUS; nothing published."
+            echo "::error::No change in $PACKAGE since $PREVIOUS_TAG; nothing published."
             exit 1
           fi
 
       - name: Build the package
         id: build
         env:
+          PACKAGE: ${{ inputs.package }}
           VERSION: ${{ steps.version.outputs.version }}
-        run: python3 -I scripts/build_vpm.py build --source source --version "$VERSION" --repository "$GITHUB_REPOSITORY"
+        run: python3 -I scripts/build_vpm.py build --package "$PACKAGE" --source source --version "$VERSION" --repository "$GITHUB_REPOSITORY"
 
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
+          PACKAGE: ${{ inputs.package }}
+          SOURCE_REPOSITORY: ${{ steps.inputs.outputs.source }}
           CHANNEL: ${{ inputs.channel }}
           TAG: ${{ steps.build.outputs.tag }}
           ZIP: ${{ steps.build.outputs.zip }}
@@ -118,7 +140,7 @@ jobs:
         run: |
           prerelease=()
           [ "$CHANNEL" = beta ] && prerelease=(--prerelease)
-          gh release create "$TAG" "$ZIP" dist/package.json --target main --title "com.riry.rirytools $VERSION" \
+          gh release create "$TAG" "$ZIP" dist/package.json --target main --title "$PACKAGE $VERSION" \
             --notes "Built from $SOURCE_REPOSITORY@$(git -C source rev-parse HEAD)." "${prerelease[@]}"
 
       # Releases made with the workflow token do not start other workflows, so start the listing build here.

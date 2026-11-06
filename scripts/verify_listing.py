@@ -7,9 +7,10 @@ The artifact must be a plain tar of regular files with no duplicates, holding
 exactly the files in Website/ plus index.json. Static files must be
 byte-identical to Website/, and the rendered pages must load only the
 template's scripts and link only to known addresses. The listing's name, id,
-url and author must match source.json, its only package must be
-com.riry.rirytools, and each version's url must point at this repository's
-release for that version. It writes a summary of what will be served to the
+url and author must match source.json, its only packages may be
+com.riry.rirytools and com.riry.animatortemplates, and each version's url must
+point at this repository's release for that version (tag vX.Y.Z for
+com.riry.rirytools, animatortemplates-vX.Y.Z for com.riry.animatortemplates). It writes a summary of what will be served to the
 run page.
 """
 import json
@@ -19,7 +20,8 @@ import sys
 import tarfile
 
 REPOSITORY = "Rionquosue/rirytools_vpm"
-PACKAGES = {"com.riry.rirytools"}
+# Package name: release tag prefix (as in build_vpm.py).
+PACKAGES = {"com.riry.rirytools": "v", "com.riry.animatortemplates": "animatortemplates-v"}
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEBSITE = os.path.join(HERE, "..", "Website")
 SOURCE_JSON = os.path.join(HERE, "..", "source.json")
@@ -98,7 +100,7 @@ def listing_problems(listing):
             found.append("%s is not one of this listing's packages" % name)
             continue
         for version, entry in sorted(package.get("versions", {}).items()):
-            expected = "https://github.com/%s/releases/download/v%s/%s-%s.zip" % (REPOSITORY, version, name, version)
+            expected = "https://github.com/%s/releases/download/%s%s/%s-%s.zip" % (REPOSITORY, PACKAGES[name], version, name, version)
             urls.add(expected)
             ok = entry.get("url") == expected
             if not ok:
