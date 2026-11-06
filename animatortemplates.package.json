@@ -1,0 +1,9 @@
+{
+  "name": "com.riry.animatortemplates",
+  "displayName": "Riry's Animator Templates",
+  "description": "Riry's animator templates for YGDR's animator template tool.",
+  "unity": "2022.3",
+  "author": {
+    "name": "Riry"
+  }
+}
