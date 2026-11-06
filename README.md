@@ -8,61 +8,61 @@ https://rionquosue.github.io/rirytools_vpm/index.json
 
 Or open [the listing page](https://rionquosue.github.io/rirytools_vpm/) and press **Add to VCC**.
 
-## How it is built
-
-Each package has its own source, fields file and release tags:
-
 | Package | Source | Fields file | Tags |
 |---|---|---|---|
 | `com.riry.rirytools` | [Rionquosue/riryunityworkflow](https://github.com/Rionquosue/riryunityworkflow) | [`package.json`](package.json) | `v<version>` |
 | `com.riry.animatortemplates` | [Rionquosue/riryanimatortemplates](https://github.com/Rionquosue/riryanimatortemplates) | [`animatortemplates.package.json`](animatortemplates.package.json) | `animatortemplates-v<version>` |
 
-1. A push to `main` or `beta` of a source runs its `notify-vpm.yml`, which starts [`build-package.yml`](.github/workflows/build-package.yml) here with the package, the channel (`stable` for `main`, `beta` for `beta`) and the commit. A run without the `package` input builds `com.riry.rirytools`.
+#### Releases on this are automatically built from commits on the main tool repositories.
 
-2. [`scripts/build_vpm.py`](scripts/build_vpm.py) zips the source's package folder (without dot files) (`.meta` files included) with the package's fields file from here, the version and url filled in.
+## Features
 
-3. Versions come only from the package's own releases here, so building one package never changes the other's version. A stable version is the package's previous stable release plus one patch (`0.1.0` to `0.1.1`; `0.1.0` if there is none). After patch 99 the minor version goes up and the patch starts again at 0 (`0.1.99` to `0.2.0`); a patch over 99 is refused. A beta is the next stable version with `-beta.N` (`0.1.1-beta.1`, `0.1.1-beta.2`) and is released as a prerelease. For a minor or major version, run **Build Package** by hand with the `package` and `version` inputs.
+- **Core Features**
+  - Automated GUID repair tool.
+      - Searches GIT commit history
+      - Caches GUID's for scene/prefab object references
+      - Allows the user to redirect the repair if automatic re-linking fails
+      - Allows the user to change all GUID's in a directory so they can manually repair a scene if required without losing work or overwriting existing work when importing an updated avatar file.
+  - Migration tool
+      - Replicates a lot of the behaviour present in Pumkin's avatar copier, but specifically shifts tooling to migrate from an old build to a new build.
+      - Fallbacks and repathing failsafes, scale detection, etc implemented to minimize human effort between release revisions.
+      - Repairs unpacked prefabs by re-linking source and applying scene overrides where able, preventing exploded mesh due to bone index errors.
+  - Icon capture tool
+      - Gives a repeatable, quick-action icon generator.
+      - Mostly useful for beta releases or personal avatars.
+      - Jobs can be repeated to re-capture each image and apply the effect stack automatically, moves previous captures to a _OLD<n> folder and links menus/prefabs by re-using the old GUID. Moved captures get a fresh GUID.
+      - Calls GestureManager to assemble a demo menu item to show the user how the icon will look applied to a menu.
+  - Import presets
+      - Allows the user to define every file within a folder with a Unity preset that will be applied automatically on import.
+      - Gives the ability to call tools like better FBX from .blend files.
+      - Automatic animation extraction before humanoid import rig is applied.
+  - Animation clean-up tools
+      - Imported animations extracted from a .blend or .fbx file often key every bone.
+      - Removes all blank keys within a floating point tolerance of rest position ignoring non-zero or non-rest, adding a whitelist or manual remove function for things that are intended to be there.
+      - Allows for remapping or retargeting by calling HFCRed's animation repath tool.
+  - Menu layout tool
+      - Uses GestureManager to create an interactive menu in edit mode.
+      - Right click to move or rename menu paths.
+      - Automatically determines if VRCFury Move Menu or hard repath is required.
+      - Can assign icons by dragging and dropping them onto the menu item.
+  - Menu mockup tool
+      - Uses Flexbox style layout editing to arrange blocks.
+      - Allows the user to mock-up a menu quickly.
+      - Can be used to provide better direction in a feature request, or provide proper direction to clanker slave on how to lay it out (they suck at UI)
+      - It is preferable to include one of the mockup yml files when requesting a feature.
 
-4. If the zip, built with the previous release's version, is identical to that release's zip, the run fails with "No change": nothing in the package changed.
+# Disclosure:
+Much of the content of these tool repositories is vibe coded. I do review it, but I am not an amazing programmer. Use at your own discretion, I do not claim ownership of any of the machine generated code. You can copy, reuse, retool, or do whatever as you please. I only ask that you properly state that LLM generated code was used in the creation of whatever product you create out of this code.
 
-5. The release (`v<version>` or `animatortemplates-v<version>`) gets the zip and `package.json`, then [`build-listing.yml`](.github/workflows/build-listing.yml) runs VRChat's [package-list-action](https://github.com/vrchat-community/package-list-action) (pinned to a commit) to build `index.json` and the landing page. [`scripts/verify_listing.py`](scripts/verify_listing.py) checks the artifact: only the files in `Website/` plus `index.json`, static files unchanged, pages loading only the template's scripts and linking only to known addresses, listing fields matching `source.json`, only `com.riry.rirytools` and `com.riry.animatortemplates`, and each version's url pointing at its release here.
+## My stance:
+I do not believe that using a tool that has AI assistance in creating it makes the product as a result AI generated. The idea of this is to assist in artists or HUMANS specifically creating what they want to create with less limitations on repetitive action. To that end I have used my unity knowledge to implement tools that will save time on these repetitive actions that are primarily a limitation of Unity's poor workflow to begin with.
 
-6. The deploy job then publishes it to GitHub Pages without waiting; merging to the source's `main` is the approval. Betas show in the VCC only for users who turn on pre-release packages.
+# I BELIEVE HUMANS SHOULD DO THE ARTISTIC PART
+### But,
+AI isn't going anywhere. It has innovated itself out of relevance at the large scales, you can host at home something that only frontier models could do six months ago on ancient hardware like a V100 and get 90% + the features and result quality. Especially cybersecurity will be affected by this (see GLM Flash models being run on small servers, they can be used for brute force reverse engineering with relative ease in a harness like Hermes) and it will trickle to you. Get educated, speak with knowledge, know the limits, know how to keep it out of your life if you want. The important part is that by educating yourself, you take back control over that choice.
 
-## Setup
+Why did I use Claude for this? I'm lazy, built in harness is good enough. It's cheap right now. I expect it won't be in six months time so I'm burning all the tokens on tooling before I have to maintain this code myself. (I have bought many books and intend to do that long term.)
 
-1. **Settings > Pages > Build and deployment > Source:** GitHub Actions.
-
-2. **Settings > Environments > github-pages:** leave **Required reviewers** empty, and under **Deployment branches and tags** allow only `main`.
-
-3. **Settings > Secrets and variables > Actions > Variables:** `TRIPWIRE_HASHES`, the comma-separated tripwire hashes for the issue check. Until it is set, the issue check fails and no issue is marked as passed.
-
-4. In `Rionquosue/riryunityworkflow` and `Rionquosue/riryanimatortemplates`, add the secret `VPM_DISPATCH_TOKEN`: a fine-grained personal access token with access to `Rionquosue/rirytools_vpm` only and the single permission **Actions: Read and write**. It can start workflows here and nothing else.
-
-5. Create a `beta` branch in all three repositories from `main`. The `beta` branch here is only for trying changes to these scripts; builds always run from `main`.
-
-To publish by hand, run **Build Package** from the Actions tab. If a release exists but its listing never deployed, run **Build Repo Listing** by hand.
-
-## Customizing the landing page
-
-The `Website` folder is the landing page template; `build-listing.yml` fills it in from `source.json`.
-
-## Issues
-
-Feature requests and bug reports use the forms in `.github/ISSUE_TEMPLATE`. [`issue-check.yml`](.github/workflows/issue-check.yml) runs [`scripts/issue_check.py`](scripts/issue_check.py) on every issue and comment change. Links, prompt markup, HTML and CSS, math formatting, styled or hidden characters, look-alike letters, text that is not in English, encoded data and very long text are flagged outright. Wording aimed at an AI reader (instruction-override phrases, AI-directed text, requests for secrets or commands) is scored instead: each phrase pattern has a weight, a text scoring 0.45 or more is flagged, and an outsider's text scoring 0.8 or more also holds the issue. One person's wording is scored across all their comments, so splitting it up does not lower it. It also checks the forms' required sections, and comments with what to fix.
-
-Labels:
-
-1. `issue-check: passed`: every check passed. Scheduled issue triage reads only issues with this label, and only through [`scripts/triage_read.py`](scripts/triage_read.py), which checks the text again at read time. The label is removed at the start of every run, so a failed run leaves the issue unread.
-2. `valid`: no security check failed. Missing form sections do not matter. Removed at the start of every run, like `issue-check: passed`.
-3. `invalid`: the issue, a comment, or the conversation read as a whole failed a security check. The conversation is locked and the issue stays open until the owner reviews it.
-4. `security: flagged`: set together with `invalid`.
-5. `security: reviewed`: the owner reviewed the current text. To clear a false positive, read the issue and every comment, then post a comment that is exactly `reviewed <fingerprint>`, with the 64-character fingerprint from the check's comment. Only your latest review counts, and any later change to the text gives a new fingerprint and needs a new review.
-6. `needs clarification`: required form sections are missing.
-
-Flagged text locks the conversation; nothing is deleted or closed. After a review clears it, unlock the conversation by hand. The owner is assigned to every flagged issue. After three flagged edits by the same person, the flag is held: a review clears it only for the text reviewed, and any later change needs a new review.
-
-Text from the owner, members and collaborators skips the link, path, HTML and encoding checks but gets every check aimed at AI readers, since it may relay outsider text. A conversation over 200,000 characters, or one too slow to check, is flagged for review. Only English is accepted: characters outside plain English text (ASCII, common symbols and punctuation, arrows, box drawing and emoji) are flagged, and so is text written mostly with common words of other languages.
 
 ## Contact
 
