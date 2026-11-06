@@ -1,6 +1,6 @@
 # RiryTools VPM Listing
 
-The VRChat Creator Companion (VCC) listing for RiryTools. Add it in the VCC under **Settings > Packages > Add Repository**:
+The VRChat Creator Companion (VCC) listing for RiryTools (`com.riry.rirytools`) and Riry's Animator Templates (`com.riry.animatortemplates`). Add it in the VCC under **Settings > Packages > Add Repository**:
 
 ```text
 https://rionquosue.github.io/rirytools_vpm/index.json
@@ -10,15 +10,22 @@ Or open [the listing page](https://rionquosue.github.io/rirytools_vpm/) and pres
 
 ## How it is built
 
-1. A push to `main` or `beta` of [Rionquosue/riryunityworkflow](https://github.com/Rionquosue/riryunityworkflow) (the source) runs its `notify-vpm.yml`, which starts [`build-package.yml`](.github/workflows/build-package.yml) here with the channel (`stable` for `main`, `beta` for `beta`) and the commit.
+Each package has its own source, fields file and release tags:
 
-2. [`scripts/build_vpm.py`](scripts/build_vpm.py) zips the source's `com.riry.rirytools` folder (without dot files) (`.meta` files included) with [`package.json`](package.json) from here, the version and url filled in.
+| Package | Source | Fields file | Tags |
+|---|---|---|---|
+| `com.riry.rirytools` | [Rionquosue/riryunityworkflow](https://github.com/Rionquosue/riryunityworkflow) | [`package.json`](package.json) | `v<version>` |
+| `com.riry.animatortemplates` | [Rionquosue/riryanimatortemplates](https://github.com/Rionquosue/riryanimatortemplates) | [`animatortemplates.package.json`](animatortemplates.package.json) | `animatortemplates-v<version>` |
 
-3. Versions come only from this repository's releases. A stable version is the previous stable release plus one patch (`0.7.2` to `0.7.3`; `0.0.1` if there is none). A beta is the next stable version with `-beta.N` (`0.7.3-beta.1`, `0.7.3-beta.2`) and is released as a prerelease. For a minor or major version, run **Build Package** by hand with the `version` input.
+1. A push to `main` or `beta` of a source runs its `notify-vpm.yml`, which starts [`build-package.yml`](.github/workflows/build-package.yml) here with the package, the channel (`stable` for `main`, `beta` for `beta`) and the commit. A run without the `package` input builds `com.riry.rirytools`.
+
+2. [`scripts/build_vpm.py`](scripts/build_vpm.py) zips the source's package folder (without dot files) (`.meta` files included) with the package's fields file from here, the version and url filled in.
+
+3. Versions come only from the package's own releases here, so building one package never changes the other's version. A stable version is the package's previous stable release plus one patch (`0.7.2` to `0.7.3`; `0.0.1` if there is none). A beta is the next stable version with `-beta.N` (`0.7.3-beta.1`, `0.7.3-beta.2`) and is released as a prerelease. For a minor or major version, run **Build Package** by hand with the `package` and `version` inputs.
 
 4. If the zip, built with the previous release's version, is identical to that release's zip, the run fails with "No change": nothing in the package changed.
 
-5. The release `v<version>` gets the zip and `package.json`, then [`build-listing.yml`](.github/workflows/build-listing.yml) runs VRChat's [package-list-action](https://github.com/vrchat-community/package-list-action) (pinned to a commit) to build `index.json` and the landing page. [`scripts/verify_listing.py`](scripts/verify_listing.py) checks the artifact: only the files in `Website/` plus `index.json`, static files unchanged, pages loading only the template's scripts and linking only to known addresses, listing fields matching `source.json`, only `com.riry.rirytools`, and each version's url pointing at its release here.
+5. The release (`v<version>` or `animatortemplates-v<version>`) gets the zip and `package.json`, then [`build-listing.yml`](.github/workflows/build-listing.yml) runs VRChat's [package-list-action](https://github.com/vrchat-community/package-list-action) (pinned to a commit) to build `index.json` and the landing page. [`scripts/verify_listing.py`](scripts/verify_listing.py) checks the artifact: only the files in `Website/` plus `index.json`, static files unchanged, pages loading only the template's scripts and linking only to known addresses, listing fields matching `source.json`, only `com.riry.rirytools` and `com.riry.animatortemplates`, and each version's url pointing at its release here.
 
 6. The deploy job then publishes it to GitHub Pages without waiting; merging to the source's `main` is the approval. Betas show in the VCC only for users who turn on pre-release packages.
 
@@ -30,9 +37,9 @@ Or open [the listing page](https://rionquosue.github.io/rirytools_vpm/) and pres
 
 3. **Settings > Secrets and variables > Actions > Variables:** `TRIPWIRE_HASHES`, the comma-separated tripwire hashes for the issue check. Until it is set, the issue check fails and no issue is marked as passed.
 
-4. In `Rionquosue/riryunityworkflow`, add the secret `VPM_DISPATCH_TOKEN`: a fine-grained personal access token with access to `Rionquosue/rirytools_vpm` only and the single permission **Actions: Read and write**. It can start workflows here and nothing else.
+4. In `Rionquosue/riryunityworkflow` and `Rionquosue/riryanimatortemplates`, add the secret `VPM_DISPATCH_TOKEN`: a fine-grained personal access token with access to `Rionquosue/rirytools_vpm` only and the single permission **Actions: Read and write**. It can start workflows here and nothing else.
 
-5. Create a `beta` branch in both repositories from `main`. The `beta` branch here is only for trying changes to these scripts; builds always run from `main`.
+5. Create a `beta` branch in all three repositories from `main`. The `beta` branch here is only for trying changes to these scripts; builds always run from `main`.
 
 To publish by hand, run **Build Package** from the Actions tab. If a release exists but its listing never deployed, run **Build Repo Listing** by hand.
 
