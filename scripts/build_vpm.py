@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
-"""Builds the RiryTools VPM package from a checkout of the source repository.
+"""Builds one of this listing's VPM packages from a checkout of its source repository.
 
 Steps:
-  plan      Read release tags on stdin and print, as GitHub outputs, the previous
-            release on the channel and the version to publish.
-  build     Zip the source's com.riry.rirytools folder and write the release
-            package.json into --dist.
+  plan      Read release tags on stdin and print, as GitHub outputs, the package's
+            previous release on the channel, its tag, and the version to publish.
+  build     Zip the source's package folder and write the release package.json
+            into --dist.
+
+Packages (see PACKAGES):
+  com.riry.rirytools          fields package.json, tags vX.Y.Z
+  com.riry.animatortemplates  fields animatortemplates.package.json, tags animatortemplates-vX.Y.Z
 
 All versions come from this repository's releases or the --version input; nothing
-is read from the source. Stable versions count up by patch from the previous
-stable release (0.0.1 when there is none). Beta versions are the next stable
-version with -beta.N, N counting up from 1.
+is read from the source. Each package counts only its own tags, so building one
+never changes the other's version. Stable versions count up by patch from the
+package's previous stable release (0.0.1 when there is none). Beta versions are
+the next stable version with -beta.N, N counting up from 1.
 
 The zip holds the package folder's contents at its root, as the VRChat Creator
-Companion expects, with package.json from this repository's fields file and the
+Companion expects, with package.json from the package's fields file and the
 version and url filled in. The .meta files come from the source as they are.
 Entries are written in a fixed order with fixed timestamps, so the same source
 always gives the same zip and SHA-256.
@@ -26,12 +31,16 @@ import re
 import sys
 import zipfile
 
-PACKAGE_NAME = "com.riry.rirytools"
+HERE = os.path.dirname(os.path.abspath(__file__))
+# Package name: (fields file, release tag prefix).
+PACKAGES = {
+    "com.riry.rirytools": (os.path.join(HERE, "..", "package.json"), "v"),
+    "com.riry.animatortemplates": (os.path.join(HERE, "..", "animatortemplates.package.json"), "animatortemplates-v"),
+}
 # No leading zeros, so each version has one spelling.
 NUMBER = r"(0|[1-9][0-9]*)"
 STABLE = re.compile(r"%s\.%s\.%s" % (NUMBER, NUMBER, NUMBER))
 BETA = re.compile(r"%s\.%s\.%s-beta\.%s" % (NUMBER, NUMBER, NUMBER, NUMBER))
-FIELDS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "package.json")
 LFS_POINTER = b"version https://git-lfs.github.com/spec/"
 FIXED_TIME = (2020, 1, 1, 0, 0, 0)
 
@@ -41,9 +50,10 @@ def numbers(match):
     return tuple(int(part) for part in match.groups())
 
 
-def plan(tags, channel, requested):
-    """(previous release on the channel or None, version to publish)."""
-    versions = [tag.strip()[1:] for tag in tags if tag.strip().startswith("v")]
+def plan(tags, channel, requested, prefix):
+    """(previous release on the channel or None, version to publish), counting only tags
+    that start with the package's prefix."""
+    versions = [tag.strip()[len(prefix):] for tag in tags if tag.strip().startswith(prefix)]
     stable = [numbers(m) for m in (STABLE.fullmatch(v) for v in versions) if m]
     beta = [numbers(m) for m in (BETA.fullmatch(v) for v in versions) if m]
     next_stable = (max(stable)[0], max(stable)[1], max(stable)[2] + 1) if stable else (0, 0, 1)
@@ -83,16 +93,16 @@ def package_files(folder):
     return sorted(files)
 
 
-def manifest(fields_path, version, repository):
+def manifest(package, fields_path, version, repository, tag):
     """The release package.json: the fields file with version after name and url at the end."""
     with open(fields_path, encoding="utf-8") as handle:
         fields = json.load(handle)
-    if fields.get("name") != PACKAGE_NAME:
-        sys.exit("%s must have name %s." % (fields_path, PACKAGE_NAME))
+    if fields.get("name") != package:
+        sys.exit("%s must have name %s." % (fields_path, package))
     fields.pop("version", None)
     result = {"name": fields.pop("name"), "version": version}
     result.update(fields)
-    result["url"] = "https://github.com/%s/releases/download/v%s/%s-%s.zip" % (repository, version, PACKAGE_NAME, version)
+    result["url"] = "https://github.com/%s/releases/download/%s/%s-%s.zip" % (repository, tag, package, version)
     return result
 
 
@@ -121,12 +131,13 @@ def sha256(path):
 def build(args):
     if not (STABLE.fullmatch(args.version) or BETA.fullmatch(args.version)):
         sys.exit("--version must be X.Y.Z or X.Y.Z-beta.N.")
-    folder = os.path.join(args.source, PACKAGE_NAME)
+    fields, prefix = PACKAGES[args.package]
+    folder = os.path.join(args.source, args.package)
     if not os.path.isdir(folder) or os.path.islink(folder):
-        sys.exit("%s has no %s folder." % (args.source, PACKAGE_NAME))
-    manifest_bytes = (json.dumps(manifest(args.fields, args.version, args.repository), indent=2, ensure_ascii=False) + "\n").encode("utf-8")
-    tag = "v" + args.version
-    zip_name = "%s-%s.zip" % (PACKAGE_NAME, args.version)
+        sys.exit("%s has no %s folder." % (args.source, args.package))
+    tag = prefix + args.version
+    manifest_bytes = (json.dumps(manifest(args.package, args.fields or fields, args.version, args.repository, tag), indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    zip_name = "%s-%s.zip" % (args.package, args.version)
     os.makedirs(args.dist, exist_ok=True)
     zip_path = os.path.join(args.dist, zip_name)
     files = package_files(folder)
@@ -144,10 +155,11 @@ def build(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("step", choices=["plan", "build"])
+    parser.add_argument("--package", required=True, choices=sorted(PACKAGES), help="Package to plan or build.")
     parser.add_argument("--channel", choices=["stable", "beta"], help="Release channel (plan).")
     parser.add_argument("--version", default="", help="Version to publish; empty for automatic (plan), or to build (build).")
     parser.add_argument("--source", help="Checkout of the source repository (build).")
-    parser.add_argument("--fields", default=FIELDS, help="The package.json fields file (build).")
+    parser.add_argument("--fields", help="The package.json fields file (build); default the package's own.")
     parser.add_argument("--repository", help="owner/name of this repository (build).")
     parser.add_argument("--dist", default="dist", help="Folder for the zip and package.json (build).")
     args = parser.parse_args()
@@ -157,8 +169,9 @@ def main():
         pattern = STABLE if args.channel == "stable" else BETA
         if args.version and not pattern.fullmatch(args.version):
             parser.error("--version must be %s for the %s channel" % ("X.Y.Z" if args.channel == "stable" else "X.Y.Z-beta.N", args.channel))
-        previous, version = plan(sys.stdin, args.channel, args.version)
-        print("previous=%s\nversion=%s" % (previous or "", version))
+        prefix = PACKAGES[args.package][1]
+        previous, version = plan(sys.stdin, args.channel, args.version, prefix)
+        print("previous=%s\nprevious_tag=%s\nversion=%s" % (previous or "", prefix + previous if previous else "", version))
         return
     if not (args.source and args.version and args.repository):
         parser.error("--source, --version and --repository are required for build")
