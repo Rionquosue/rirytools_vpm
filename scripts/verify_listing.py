@@ -8,9 +8,10 @@ exactly the files in Website/ plus index.json. Static files must be
 byte-identical to Website/, and the rendered pages must load only the
 template's scripts and link only to known addresses. The listing's name, id,
 url and author must match source.json, its only packages may be
-com.riry.rirytools and com.riry.animatortemplates, and each version's url must
-point at this repository's release for that version (tag vX.Y.Z for
-com.riry.rirytools, animatortemplates-vX.Y.Z for com.riry.animatortemplates). It writes a summary of what will be served to the
+com.riry.rirytools, com.riry.animatortemplates and com.riry.ftemulator, and each
+version's url must point at this repository's release for that version (tag
+vX.Y.Z for com.riry.rirytools, animatortemplates-vX.Y.Z for
+com.riry.animatortemplates, ftemulator-vX.Y.Z for com.riry.ftemulator). It writes a summary of what will be served to the
 run page.
 """
 import json
@@ -21,7 +22,7 @@ import tarfile
 
 REPOSITORY = "Rionquosue/rirytools_vpm"
 # Package name: release tag prefix (as in build_vpm.py).
-PACKAGES = {"com.riry.rirytools": "v", "com.riry.animatortemplates": "animatortemplates-v"}
+PACKAGES = {"com.riry.rirytools": "v", "com.riry.animatortemplates": "animatortemplates-v", "com.riry.ftemulator": "ftemulator-v"}
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEBSITE = os.path.join(HERE, "..", "Website")
 SOURCE_JSON = os.path.join(HERE, "..", "source.json")

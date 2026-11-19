@@ -10,10 +10,11 @@ Steps:
 Packages (see PACKAGES):
   com.riry.rirytools          fields package.json, tags vX.Y.Z
   com.riry.animatortemplates  fields animatortemplates.package.json, tags animatortemplates-vX.Y.Z
+  com.riry.ftemulator         fields ftemulator.package.json, tags ftemulator-vX.Y.Z
 
 All versions come from this repository's releases or the --version input; nothing
 is read from the source. Each package counts only its own tags, so building one
-never changes the other's version. Stable versions count up by patch from the
+never changes another's version. Stable versions count up by patch from the
 package's previous stable release (0.1.0 when there is none); after patch 99 the minor version goes
 up and the patch starts again at 0 (0.1.99 to 0.2.0). Beta versions are the next
 stable version with -beta.N, N counting up from 1.
@@ -37,6 +38,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PACKAGES = {
     "com.riry.rirytools": (os.path.join(HERE, "..", "package.json"), "v"),
     "com.riry.animatortemplates": (os.path.join(HERE, "..", "animatortemplates.package.json"), "animatortemplates-v"),
+    "com.riry.ftemulator": (os.path.join(HERE, "..", "ftemulator.package.json"), "ftemulator-v"),
 }
 # No leading zeros, so each version has one spelling.
 NUMBER = r"(0|[1-9][0-9]*)"

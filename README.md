@@ -1,6 +1,6 @@
 # RiryTools VPM Listing
 
-The VRChat Creator Companion (VCC) listing for RiryTools (`com.riry.rirytools`) and Riry's Animator Templates (`com.riry.animatortemplates`). Add it in the VCC under **Settings > Packages > Add Repository**:
+The VRChat Creator Companion (VCC) listing for RiryTools (`com.riry.rirytools`), Riry's Animator Templates (`com.riry.animatortemplates`) and RiryTools FTEmulator (`com.riry.ftemulator`). Add it in the VCC under **Settings > Packages > Add Repository**:
 
 ```text
 https://rionquosue.github.io/rirytools_vpm/index.json
@@ -12,6 +12,7 @@ Or open [the listing page](https://rionquosue.github.io/rirytools_vpm/) and pres
 |---|---|---|---|
 | `com.riry.rirytools` | [Rionquosue/riryunityworkflow](https://github.com/Rionquosue/riryunityworkflow) | [`package.json`](package.json) | `v<version>` |
 | `com.riry.animatortemplates` | [Rionquosue/riryanimatortemplates](https://github.com/Rionquosue/riryanimatortemplates) | [`animatortemplates.package.json`](animatortemplates.package.json) | `animatortemplates-v<version>` |
+| `com.riry.ftemulator` | [Rionquosue/riryunityworkflow](https://github.com/Rionquosue/riryunityworkflow) | [`ftemulator.package.json`](ftemulator.package.json) | `ftemulator-v<version>` |
 
 #### Releases on this are automatically built from commits on the main tool repositories.
 

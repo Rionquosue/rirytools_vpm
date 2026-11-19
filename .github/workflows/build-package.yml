@@ -3,6 +3,7 @@
 #
 #   com.riry.rirytools          from Rionquosue/riryunityworkflow, tags vX.Y.Z
 #   com.riry.animatortemplates  from Rionquosue/riryanimatortemplates, tags animatortemplates-vX.Y.Z
+#   com.riry.ftemulator         from Rionquosue/riryunityworkflow, tags ftemulator-vX.Y.Z
 #
 # Started by each source repository's notify-vpm.yml on every push to main (stable)
 # or beta (beta), or by hand. The listing is then rebuilt and deployed to VCC users
@@ -24,6 +25,7 @@ on:
         options:
           - com.riry.rirytools
           - com.riry.animatortemplates
+          - com.riry.ftemulator
       channel:
         description: "stable (source main) or beta (source beta)"
         required: true
@@ -67,6 +69,7 @@ jobs:
           case "$PACKAGE" in
             com.riry.rirytools) source=Rionquosue/riryunityworkflow ;;
             com.riry.animatortemplates) source=Rionquosue/riryanimatortemplates ;;
+            com.riry.ftemulator) source=Rionquosue/riryunityworkflow ;;
             *) echo "::error::package is not one of this listing's packages."; exit 1 ;;
           esac
           case "$CHANNEL" in

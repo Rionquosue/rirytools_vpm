@@ -1,0 +1,12 @@
+{
+  "name": "com.riry.ftemulator",
+  "displayName": "RiryTools FTEmulator",
+  "description": "A face tracking emulator for Play Mode, paired with Gesture Manager: VRCFaceTracking OSC or manual input, hardware profiles, native and legacy face tracking output, and a debug window. Needs RiryTools and the VRChat Avatars SDK 3.7.0 or newer.",
+  "unity": "2022.3",
+  "author": {
+    "name": "Riry"
+  },
+  "vpmDependencies": {
+    "com.riry.rirytools": ">=0.7.1-beta.1"
+  }
+}
