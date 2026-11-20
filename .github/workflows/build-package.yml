@@ -5,8 +5,8 @@
 #   com.riry.animatortemplates  from Rionquosue/riryanimatortemplates, tags animatortemplates-vX.Y.Z
 #   com.riry.ftemulator         from Rionquosue/riryunityworkflow, tags ftemulator-vX.Y.Z
 #
-# Started by each source repository's notify-vpm.yml on every push to main (stable)
-# or beta (beta), or by hand. The listing is then rebuilt and deployed to VCC users
+# Started by each source repository's notify-vpm.yml on every push to main (stable),
+# beta (beta) or beta-unity6 (beta-unity6: X.Y.Z-beta.N-unity6, Unity 6 only), or by hand. The listing is then rebuilt and deployed to VCC users
 # without further approval (see build-listing.yml).
 #
 # Versions come from the package's own releases here or the version input (see
@@ -27,18 +27,19 @@ on:
           - com.riry.animatortemplates
           - com.riry.ftemulator
       channel:
-        description: "stable (source main) or beta (source beta)"
+        description: "stable (source main), beta (source beta) or beta-unity6 (source beta-unity6)"
         required: true
         type: choice
         options:
           - stable
           - beta
+          - beta-unity6
       sha:
         description: "Source commit (40 hex); empty for the head of the channel's branch"
         required: false
         default: ""
       version:
-        description: "Version to publish (X.Y.Z, or X.Y.Z-beta.N for beta; Z at most 99); empty for automatic"
+        description: "Version to publish (X.Y.Z, X.Y.Z-beta.N for beta, X.Y.Z-beta.N-unity6 for beta-unity6; Z at most 99); empty for automatic"
         required: false
         default: ""
 
@@ -75,7 +76,8 @@ jobs:
           case "$CHANNEL" in
             stable) branch=main; pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]?)$' ;;
             beta) branch=beta; pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]?)-beta\.(0|[1-9][0-9]*)$' ;;
-            *) echo "::error::channel must be stable or beta."; exit 1 ;;
+            beta-unity6) branch=beta-unity6; pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]?)-beta\.(0|[1-9][0-9]*)-unity6$' ;;
+            *) echo "::error::channel must be stable, beta or beta-unity6."; exit 1 ;;
           esac
           [[ -z "$SHA" || "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha must be 40 lowercase hex."; exit 1; }
           [[ -z "$VERSION" || "$VERSION" =~ $pattern ]] || { echo "::error::version does not fit the $CHANNEL channel."; exit 1; }
@@ -142,7 +144,7 @@ jobs:
           VERSION: ${{ steps.build.outputs.version }}
         run: |
           prerelease=()
-          [ "$CHANNEL" = beta ] && prerelease=(--prerelease)
+          [ "$CHANNEL" != stable ] && prerelease=(--prerelease)
           gh release create "$TAG" "$ZIP" dist/package.json --target main --title "$PACKAGE $VERSION" \
             --notes "Built from $SOURCE_REPOSITORY@$(git -C source rev-parse HEAD)." "${prerelease[@]}"
 

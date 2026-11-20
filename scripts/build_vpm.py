@@ -17,7 +17,10 @@ is read from the source. Each package counts only its own tags, so building one
 never changes another's version. Stable versions count up by patch from the
 package's previous stable release (0.1.0 when there is none); after patch 99 the minor version goes
 up and the patch starts again at 0 (0.1.99 to 0.2.0). Beta versions are the next
-stable version with -beta.N, N counting up from 1.
+stable version with -beta.N, N counting up from 1. The beta-unity6 channel (source branch
+beta-unity6, for Unity 6) publishes X.Y.Z-beta.N-unity6; it shares N with the beta channel,
+so each new beta or beta-unity6 release takes the next N of either, and its package.json
+says "unity": "6000.0", so VCC only offers it to Unity 6 projects.
 
 The zip holds the package folder's contents at its root, as the VRChat Creator
 Companion expects, with package.json from the package's fields file and the
@@ -44,6 +47,11 @@ PACKAGES = {
 NUMBER = r"(0|[1-9][0-9]*)"
 STABLE = re.compile(r"%s\.%s\.%s" % (NUMBER, NUMBER, NUMBER))
 BETA = re.compile(r"%s\.%s\.%s-beta\.%s" % (NUMBER, NUMBER, NUMBER, NUMBER))
+UNITY6_SUFFIX = "-unity6"
+UNITY6 = re.compile(r"%s\.%s\.%s-beta\.%s%s" % (NUMBER, NUMBER, NUMBER, NUMBER, re.escape(UNITY6_SUFFIX)))
+UNITY6_EDITOR = "6000.0"
+# Channel: how its version is written, for errors.
+CHANNELS = {"stable": "X.Y.Z", "beta": "X.Y.Z-beta.N", "beta-unity6": "X.Y.Z-beta.N-unity6"}
 FIRST = (0, 1, 0)
 MAX_PATCH = 99
 LFS_POINTER = b"version https://git-lfs.github.com/spec/"
@@ -70,15 +78,23 @@ def plan(tags, channel, requested, prefix):
     versions = [tag.strip()[len(prefix):] for tag in tags if tag.strip().startswith(prefix)]
     stable = [n for n in (parse(STABLE, v) for v in versions) if n]
     beta = [n for n in (parse(BETA, v) for v in versions) if n]
+    unity6 = [n for n in (parse(UNITY6, v) for v in versions) if n]
     next_stable = next_after(max(stable)) if stable else FIRST
     if channel == "stable":
         previous = "%d.%d.%d" % max(stable) if stable else None
         automatic = "%d.%d.%d" % next_stable
     else:
-        previous = "%d.%d.%d-beta.%d" % max(beta) if beta else None
-        count = max([b[3] for b in beta if b[:3] == next_stable], default=0)
-        automatic = "%d.%d.%d-beta.%d" % (next_stable + (count + 1,))
+        own = unity6 if channel == "beta-unity6" else beta
+        suffix = UNITY6_SUFFIX if channel == "beta-unity6" else ""
+        previous = "%d.%d.%d-beta.%d" % max(own) + suffix if own else None
+        # N is shared by beta and beta-unity6.
+        count = max([b[3] for b in beta + unity6 if b[:3] == next_stable], default=0)
+        automatic = "%d.%d.%d-beta.%d" % (next_stable + (count + 1,)) + suffix
     return previous, requested or automatic
+
+
+def channel_pattern(channel):
+    return {"stable": STABLE, "beta": BETA, "beta-unity6": UNITY6}[channel]
 
 
 def package_files(folder):
@@ -116,6 +132,8 @@ def manifest(package, fields_path, version, repository, tag):
     fields.pop("version", None)
     result = {"name": fields.pop("name"), "version": version}
     result.update(fields)
+    if version.endswith(UNITY6_SUFFIX):
+        result["unity"] = UNITY6_EDITOR
     result["url"] = "https://github.com/%s/releases/download/%s/%s-%s.zip" % (repository, tag, package, version)
     return result
 
@@ -143,8 +161,8 @@ def sha256(path):
 
 
 def build(args):
-    if not (parse(STABLE, args.version) or parse(BETA, args.version)):
-        sys.exit("--version must be X.Y.Z or X.Y.Z-beta.N, with Z at most %d." % MAX_PATCH)
+    if not (parse(STABLE, args.version) or parse(BETA, args.version) or parse(UNITY6, args.version)):
+        sys.exit("--version must be X.Y.Z, X.Y.Z-beta.N or X.Y.Z-beta.N-unity6, with Z at most %d." % MAX_PATCH)
     fields, prefix = PACKAGES[args.package]
     folder = os.path.join(args.source, args.package)
     if not os.path.isdir(folder) or os.path.islink(folder):
@@ -170,7 +188,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("step", choices=["plan", "build"])
     parser.add_argument("--package", required=True, choices=sorted(PACKAGES), help="Package to plan or build.")
-    parser.add_argument("--channel", choices=["stable", "beta"], help="Release channel (plan).")
+    parser.add_argument("--channel", choices=sorted(CHANNELS), help="Release channel (plan).")
     parser.add_argument("--version", default="", help="Version to publish; empty for automatic (plan), or to build (build).")
     parser.add_argument("--source", help="Checkout of the source repository (build).")
     parser.add_argument("--fields", help="The package.json fields file (build); default the package's own.")
@@ -180,9 +198,9 @@ def main():
     if args.step == "plan":
         if not args.channel:
             parser.error("--channel is required for plan")
-        pattern = STABLE if args.channel == "stable" else BETA
+        pattern = channel_pattern(args.channel)
         if args.version and not parse(pattern, args.version):
-            parser.error("--version must be %s for the %s channel, with Z at most %d" % ("X.Y.Z" if args.channel == "stable" else "X.Y.Z-beta.N", args.channel, MAX_PATCH))
+            parser.error("--version must be %s for the %s channel, with Z at most %d" % (CHANNELS[args.channel], args.channel, MAX_PATCH))
         prefix = PACKAGES[args.package][1]
         previous, version = plan(sys.stdin, args.channel, args.version, prefix)
         print("previous=%s\nprevious_tag=%s\nversion=%s" % (previous or "", prefix + previous if previous else "", version))
