@@ -22,6 +22,11 @@ beta-unity6, for Unity 6) publishes X.Y.Z-beta.N-unity6; it shares N with the be
 so each new beta or beta-unity6 release takes the next N of either, and its package.json
 says "unity": "6000.0", so VCC only offers it to Unity 6 projects.
 
+A package in DEPENDENCIES gets vpmDependencies at build time: each listed package at ">=" its
+current release on the same channel (stable, beta or beta-unity6, read from the version being
+built), from the release tags given with --tags. The build stops when that package has no
+release on the channel, so a release never requires a version that does not exist.
+
 The zip holds the package folder's contents at its root, as the VRChat Creator
 Companion expects, with package.json from the package's fields file and the
 version and url filled in. The .meta files come from the source as they are.
@@ -42,6 +47,10 @@ PACKAGES = {
     "com.riry.rirytools": (os.path.join(HERE, "..", "package.json"), "v"),
     "com.riry.animatortemplates": (os.path.join(HERE, "..", "animatortemplates.package.json"), "animatortemplates-v"),
     "com.riry.ftemulator": (os.path.join(HERE, "..", "ftemulator.package.json"), "ftemulator-v"),
+}
+# Package name: packages it needs, each required at ">=" its current release on the channel being built.
+DEPENDENCIES = {
+    "com.riry.ftemulator": ["com.riry.rirytools"],
 }
 # No leading zeros, so each version has one spelling.
 NUMBER = r"(0|[1-9][0-9]*)"
@@ -70,6 +79,41 @@ def next_after(version):
     """The stable version after (major, minor, patch): one more patch, or the next minor after MAX_PATCH."""
     major, minor, patch = version[:3]
     return (major, minor, patch + 1) if patch < MAX_PATCH else (major, minor + 1, 0)
+
+
+def channel_of(version):
+    """The channel a version belongs to."""
+    for channel in ("stable", "beta", "beta-unity6"):
+        if parse(channel_pattern(channel), version):
+            return channel
+    return None
+
+
+def current(tags, channel, prefix):
+    """The newest release on the channel among tags that start with prefix, or None."""
+    pattern = channel_pattern(channel)
+    found = []
+    for tag in tags:
+        tag = tag.strip()
+        numbers = parse(pattern, tag[len(prefix):]) if tag.startswith(prefix) else None
+        if numbers:
+            found.append((numbers, tag[len(prefix):]))
+    return max(found)[1] if found else None
+
+
+def dependencies(package, channel, tags):
+    """vpmDependencies for the package on the channel, or None when it needs none. Exits when a
+    needed package has no release on the channel."""
+    needed = DEPENDENCIES.get(package)
+    if not needed:
+        return None
+    result = {}
+    for name in needed:
+        version = current(tags, channel, PACKAGES[name][1])
+        if not version:
+            sys.exit("%s needs %s, which has no %s release yet." % (package, name, channel))
+        result[name] = ">=" + version
+    return result
 
 
 def plan(tags, channel, requested, prefix):
@@ -123,17 +167,22 @@ def package_files(folder):
     return sorted(files)
 
 
-def manifest(package, fields_path, version, repository, tag):
-    """The release package.json: the fields file with version after name and url at the end."""
+def manifest(package, fields_path, version, repository, tag, needs=None):
+    """The release package.json: the fields file with version after name, vpmDependencies (when the
+    package needs others) and url at the end."""
     with open(fields_path, encoding="utf-8") as handle:
         fields = json.load(handle)
     if fields.get("name") != package:
         sys.exit("%s must have name %s." % (fields_path, package))
+    if "vpmDependencies" in fields:
+        sys.exit("%s must not have vpmDependencies; they are set at build time (DEPENDENCIES)." % fields_path)
     fields.pop("version", None)
     result = {"name": fields.pop("name"), "version": version}
     result.update(fields)
     if version.endswith(UNITY6_SUFFIX):
         result["unity"] = UNITY6_EDITOR
+    if needs:
+        result["vpmDependencies"] = needs
     result["url"] = "https://github.com/%s/releases/download/%s/%s-%s.zip" % (repository, tag, package, version)
     return result
 
@@ -168,7 +217,15 @@ def build(args):
     if not os.path.isdir(folder) or os.path.islink(folder):
         sys.exit("%s has no %s folder." % (args.source, args.package))
     tag = prefix + args.version
-    manifest_bytes = (json.dumps(manifest(args.package, args.fields or fields, args.version, args.repository, tag), indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    needs = None
+    if args.package in DEPENDENCIES:
+        if not args.tags:
+            sys.exit("--tags is required for %s, which needs %s." % (args.package, ", ".join(DEPENDENCIES[args.package])))
+        with open(args.tags, encoding="utf-8") as handle:
+            needs = dependencies(args.package, channel_of(args.version), handle.readlines())
+        for name, requirement in needs.items():
+            print("%s requires %s %s." % (args.package, name, requirement))
+    manifest_bytes = (json.dumps(manifest(args.package, args.fields or fields, args.version, args.repository, tag, needs), indent=2, ensure_ascii=False) + "\n").encode("utf-8")
     zip_name = "%s-%s.zip" % (args.package, args.version)
     os.makedirs(args.dist, exist_ok=True)
     zip_path = os.path.join(args.dist, zip_name)
@@ -193,6 +250,7 @@ def main():
     parser.add_argument("--source", help="Checkout of the source repository (build).")
     parser.add_argument("--fields", help="The package.json fields file (build); default the package's own.")
     parser.add_argument("--repository", help="owner/name of this repository (build).")
+    parser.add_argument("--tags", help="File of this repository's release tags, one per line (build); needed for a package in DEPENDENCIES.")
     parser.add_argument("--dist", default="dist", help="Folder for the zip and package.json (build).")
     args = parser.parse_args()
     if args.step == "plan":

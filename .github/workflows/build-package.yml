@@ -12,6 +12,8 @@
 # Versions come from the package's own releases here or the version input (see
 # scripts/build_vpm.py), so building one package never changes the other's version.
 # The run aborts when the package is unchanged since its previous release on the channel.
+# com.riry.ftemulator's release requires com.riry.rirytools at ">=" RiryTools' current release
+# on the same channel (scripts/build_vpm.py DEPENDENCIES).
 name: Build Package
 
 on:
@@ -118,7 +120,7 @@ jobs:
           PREVIOUS: ${{ steps.version.outputs.previous }}
           PREVIOUS_TAG: ${{ steps.version.outputs.previous_tag }}
         run: |
-          GITHUB_OUTPUT="$RUNNER_TEMP/previous" python3 -I scripts/build_vpm.py build --package "$PACKAGE" --source source --version "$PREVIOUS" --repository "$GITHUB_REPOSITORY" --dist "$RUNNER_TEMP/previous-dist"
+          GITHUB_OUTPUT="$RUNNER_TEMP/previous" python3 -I scripts/build_vpm.py build --package "$PACKAGE" --source source --version "$PREVIOUS" --repository "$GITHUB_REPOSITORY" --tags "$RUNNER_TEMP/tags" --dist "$RUNNER_TEMP/previous-dist"
           built=$(sed -n 's/^digest=//p' "$RUNNER_TEMP/previous")
           released=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$PREVIOUS_TAG" --jq ".assets[] | select(.name == \"$PACKAGE-$PREVIOUS.zip\") | .digest")
           if [ "$built" = "$released" ]; then
@@ -131,7 +133,7 @@ jobs:
         env:
           PACKAGE: ${{ inputs.package }}
           VERSION: ${{ steps.version.outputs.version }}
-        run: python3 -I scripts/build_vpm.py build --package "$PACKAGE" --source source --version "$VERSION" --repository "$GITHUB_REPOSITORY"
+        run: python3 -I scripts/build_vpm.py build --package "$PACKAGE" --source source --version "$VERSION" --repository "$GITHUB_REPOSITORY" --tags "$RUNNER_TEMP/tags"
 
       - name: Publish the release
         env:

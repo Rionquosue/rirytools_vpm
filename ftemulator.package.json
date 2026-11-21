@@ -5,8 +5,5 @@
   "unity": "2022.3",
   "author": {
     "name": "Riry"
-  },
-  "vpmDependencies": {
-    "com.riry.rirytools": ">=0.7.1-beta.1"
   }
 }
